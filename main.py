@@ -3,8 +3,8 @@ import sys
 import json
 import signal
 import telebot
-from telebot import types
 import subprocess
+from telebot import types
 from dropbox_helper import DropBoxUpload
 
 # global variables
@@ -112,11 +112,15 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
         return (True, output[-1].strip())
     else:
         global active_process
+        if chat_id not in active_process:
+            active_process[chat_id] = {}
         # check if active process have key with chat id
         if chat_id in active_process and process_name in active_process[chat_id]:
             active_process[chat_id][process_name].append(process.pid)
         else:
             active_process[chat_id][process_name] = [process.pid]
+            
+        print(active_process)
             
 # command handlers
 
@@ -124,9 +128,43 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
 @bot.message_handler(commands=['start', 'help', 'info'])
 def start(message):
    # open the welcome message file
-    with open('info.txt', 'r') as f:
-        info = f.read()
-    bot.reply_to(message, info)
+    
+    # create reply markup
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    
+    whoami_button = types.InlineKeyboardButton("Ben Kimim?  \U0001F464", callback_data='whoami')
+    howtowork_button = types.InlineKeyboardButton("Nasıl Çalışır?  \U0001F4BB", callback_data='howtowork')
+    contact_button = types.InlineKeyboardButton("İletişim  \U0001F4E9", callback_data='contact')
+    
+    keyboard.add(whoami_button, howtowork_button, contact_button)
+    
+    start = open('info/start.txt', 'r', encoding='utf-8')
+    start_message = start.read()
+    start.close()
+    
+    bot.send_message(message.chat.id, start_message, reply_markup=keyboard)
+    
+    @bot.callback_query_handler(func=lambda call: call.data == 'whoami')
+    def whoami(call):
+        whoami = open('info/whoami.txt', 'r', encoding='utf-8')
+        whoami_message = whoami.read()
+        whoami.close()
+        bot.send_message(call.message.chat.id, whoami_message)
+        
+    @bot.callback_query_handler(func=lambda call: call.data == 'howtowork')
+    def howtowork(call):
+        howtowork = open('info/howtowork.txt', 'r', encoding='utf-8')
+        howtowork_message = howtowork.read()
+        howtowork.close()
+        bot.send_message(call.message.chat.id, howtowork_message, parse_mode='HTML')
+        
+    @bot.callback_query_handler(func=lambda call: call.data == 'contact')
+    def contact(call):
+        contact = open('info/contact.txt', 'r', encoding='utf-8')
+        contact_message = contact.read()
+        contact.close()
+        bot.send_message(call.message.chat.id, contact_message)
+    
 
 ## youtube
 @bot.message_handler(commands=['youtube'])
@@ -294,7 +332,8 @@ def yht_handler(message):
 
                     # call the train search
                     python_file = os.path.join(os.getcwd(), 'yht', 'yht_check.py')
-                    arguments = [message.chat.id, info['departure_station'], info['arrival_station'], info['date'], info['time']]
+                    print(python_file)
+                    arguments = [token, str(message.chat.id), info['departure_station'], info['arrival_station'], info['date'], info['time']]
                     
                     process_handler(['python', python_file] + arguments, False, 'yht', message.chat.id)
 
@@ -318,6 +357,8 @@ def yht_cancel_handler(message):
         
         if(len(user_jobs) > 0):
             bot.send_message(message.chat.id, user_jobs)
+            
+    print(active_process)
                          
 
 ## text to speech
@@ -348,6 +389,11 @@ def tts_handler(message):
     
     file_handler(message, out[1], type='audio')
     os.remove(txt_file)
+    
+## pedro
+@bot.message_handler(commands=['pedro'])
+def pedro_handler(message):
+    bot.send_video(message.chat.id, video = 'BAACAgQAAxkDAAIEI2YkHfk_t10R31SISqYxWk27VaDcAAJGEwACwmwgUZ6kBxvyfD_UNAQ', supports_streaming=True, width=1920, height=1080)
 
 # Start the bot
 bot.polling()

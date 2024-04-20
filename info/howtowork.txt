@@ -1,0 +1,16 @@
+<b>Komutlar</b>
+
+<b>/youtube YOUTUBE_URL</b>
+Bu komutla bağlantısını verdiğiniz YouTube videosunu, sesi veya aralığını seçtiğiniz klibi indirebilirsiniz. Telegram'da videolar için 50 MB sınırı olduğundan yükleme başarısız olursa video Dropbox'a yüklenir ve size bir indirme bağlantısı sağlanır.
+
+<b>/tts TEXT</b>
+Bu komutla girdiğiniz metin ses dosyasına çevrilip size gönderilir. 46'dan fazla dil desteği bulunmaktadır.
+
+<b>/yht</b>
+Bu komutu girdiğinizde size Kalkış istasyonu, Varış istasyonu, tarih ve zaman gibi parametreler sorulur. Bunları girdikten sonra TCDD YHT bileti için arama yapılmaya başlanır. Bu aşamada kritik detay durak isimlerini TCDD web sitesinde geçtiği gibi girmenizdir. Eğer boş koltuk sayısı değişirse size bir mesaj gönderilir.
+
+<b>/start /help /info</b>
+Bot hakkında ve nasıl kullanılacağı hakkında detaylar verir.
+
+<b>/pedro</b>
+PEDRO

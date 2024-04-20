@@ -9,18 +9,14 @@ import sys
 import signal
 
 #read system arguments
-
-chatId = [sys.argv[1]]
-user_nereden = sys.argv[2]
-user_nereye = sys.argv[3]
-user_tarih = sys.argv[4]
-user_hour = sys.argv[5]
+botToken = sys.argv[1]
+chatId = sys.argv[2]
+user_nereden = sys.argv[3]
+user_nereye = sys.argv[4]
+user_tarih = sys.argv[5]
+user_hour = sys.argv[6]
+state = -1
 timeout = 30
-
-print(chatId)
-print(user_nereden)
-print(user_nereye)
-print(user_tarih)
 
 
 def signal_handler(sig, frame):
@@ -32,10 +28,10 @@ signal.signal(signal.SIGINT, signal_handler)
 def sendTelegramMessage(message):
     # bot = Bot(token = botToken)
     # bot.send_message(chat_id=chatId, text=message)
-    for usrId in chatId:
-        url = f"https://api.telegram.org/bot{botToken}/sendMessage?chat_id={usrId}&text={message}"
-        requests.get(url).json()  # this sends the message
-
+    url = f"https://api.telegram.org/bot{botToken}/sendMessage?chat_id={chatId}&text={message}"
+    res = requests.get(url).json()  # this sends the message
+    if res.status_code != 200:
+        raise Exception('Invalid response from Telegram API')
 
 
 
@@ -124,8 +120,9 @@ def check_yht(counter = 0):
             except:
                 countInfo = 0
 
-            if(countInfo != states[user_hour.index(hour)]):
-                states[user_hour.index(hour)] = countInfo
+            global state
+            if(countInfo != state):
+                state = countInfo
                 if(countInfo > 0):
                     sendTelegramMessage(f'{user_nereden} - {user_nereye} arası {user_tarih} {hour} tarihli YHT seferinde {countInfo} kişilik yer bulunmaktadır.')
                 else:
@@ -133,9 +130,19 @@ def check_yht(counter = 0):
     browser.quit()
     time.sleep(1)
 
+counter = 0
 while True:
     try:
         check_yht()
+        counter = 0
         time.sleep(timeout)
     except Exception as e:
-        print('An error occured. Trying again...')
+        counter += 1
+        
+        if counter > 5:
+            f = open(f'yht/{chatId}_error.log', 'a+')
+            f.write(f'{str(e)}\n\n')
+            f.write(f'{time.ctime()}\n\n')
+            f.close()
+            sendTelegramMessage(f'YHT Seat Check programında bir hata oluştu. Hata loglarına error.log dosyasından ulaşabilirsiniz.')
+            sys.exit(0)
