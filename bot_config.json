@@ -1,0 +1,10 @@
+{
+    "bot_token": "BOT_TOKEN",
+    "owner_id": "OWNER_CHAT_ID",
+    "white_list": [
+        "CHAT_ID_0",
+        "CHAT_ID_1",
+        "CHAT_ID_2"
+    ],
+    "dropbox_token": "DROPBOX_TOKEN"
+}

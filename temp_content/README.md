@@ -1,0 +1,1 @@
+This folder contains the video, audio, text content temporarily.
