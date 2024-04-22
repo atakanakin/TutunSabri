@@ -12,5 +12,8 @@ Bu komutu girdiğinizde size Kalkış istasyonu, Varış istasyonu, tarih ve zam
 <b>/start /help /info</b>
 Bot hakkında ve nasıl kullanılacağı hakkında detaylar verir.
 
+<b>/spor /sporcancel</b>
+
+
 <b>/pedro</b>
 PEDRO

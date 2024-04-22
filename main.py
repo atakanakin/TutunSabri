@@ -404,6 +404,81 @@ def tts_handler(message):
     
     file_handler(message, out[1], type='audio')
     
+    
+## spor
+@bot.message_handler(commands=['spor'])
+def spor_handler(message):
+    # check if the user has credentials
+    user_credential_path = os.path.join(os.getcwd(), 'credentials', 'rezmetu', f'{message.chat.id}.json')
+    if(os.path.exists(user_credential_path)):
+        f = open(user_credential_path, 'r')
+        config = json.load(f)
+        f.close()
+        bot.send_message(message.chat.id, f'{config["username"]} kullanıcısı ile işlem yapılacak.')
+    else:
+        # ask for credentials
+        bot.send_message(message.chat.id, "Rezervasyon yapmak için lütfen kullanıcı adınızı giriniz: (Örnek: e123456)")
+        hold = [True, True]
+        @bot.message_handler(func=lambda message: hold[0])
+        def get_username(message):
+            username = message.text
+            hold[0] = False
+            bot.send_message(message.chat.id, "Şifrenizi giriniz:")
+            @bot.message_handler(func=lambda message: hold[1])
+            def get_password(message):
+                password = message.text
+                hold[1] = False
+                credentials = {
+                    'username': username,
+                    'password': password
+                }
+                with open(user_credential_path, 'w') as f:
+                    json.dump(credentials, f)
+    
+    bot.send_message(message.chat.id, "Lütfen seans saat bilgisini giriniz: (Örnek: 19:35 - 20:55)")
+    desiredTime = None
+    timeHold = True
+    @bot.message_handler(func=lambda message: timeHold)
+    def get_time(message):
+        global desiredTime
+        desiredTime = message.text
+        timeHold = False
+        bot.send_message(message.chat.id, "Program başlatılıyor...\nLütfen bekleyin.")
+        # call the reservation
+        python_file = os.path.join(os.getcwd(), 'spor', 'main.py')
+        arguments = [str(message.chat.id), token, desiredTime]
+        
+        process_handler(['python', python_file] + arguments, False, 'spor', message.chat.id)
+        
+
+## cancel the spor reservation
+@bot.message_handler(commands=['sporcancel'])
+def spor_cancel_handler(message):
+    global active_process
+    if message.chat.id in active_process and 'spor' in active_process[message.chat.id]:
+        for process in active_process[message.chat.id]['spor']:
+            # kill the process with the pid
+            try:
+               kill_process_tree(process)
+            except ProcessLookupError as e:
+                print('Look up error?')
+                print(e)
+            except Exception as e:
+                print(e)
+            active_process[message.chat.id]['spor'].remove(process)
+        bot.send_message(message.chat.id, "Spor salonu rezervasyon işlemi iptal edildi.")
+    else:
+        bot.send_message(message.chat.id, "Aktif bir spor salonu rezervasyon işlemi bulunamadı.")
+        
+        user_jobs = create_process_list_message(message.chat.id)
+        
+        if(len(user_jobs) > 0):
+            bot.send_message(message.chat.id, user_jobs)
+            
+    print(active_process)
+    
+    
+    
 ## pedro
 @bot.message_handler(commands=['pedro'])
 def pedro_handler(message):
