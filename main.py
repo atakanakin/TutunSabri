@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import psutil
 import signal
 import telebot
 import subprocess
@@ -12,7 +13,7 @@ active_process = {}
 youtube_urls = {}
 
 # read the bot token from the json file
-with open('conff.json') as f: # TODO: Change the file name
+with open('bot_config.json') as f:
     data = json.load(f)
     token = data['bot_token']
     dropbox_token = data['dropbox_token']
@@ -29,22 +30,34 @@ def signal_handler(sig, frame):
     global owner_id
     global bot
     global active_process
-    bot.send_message(owner_id, "Program kapatılıyor.")
+    #bot.send_message(owner_id, "Program kapatılıyor.") TODO: Uncomment this line
     # kill all active processes
-    for chat_id, processes in active_process.items():
-        for process in processes.values():
-            for pid in process:
-                try:
-                    # send information to the user
-                    bot.send_message(chat_id, "Aktif işlem iptal ediliyor. Görüşürüz...")
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+    print(active_process)
+    if(len(active_process) > 0):
+        for key, value in active_process.items():
+            if(len(value) > 0):
+                for key2, value2 in value.items():
+                    for process in value2:
+                        try:
+                            bot.send_message(key, f'{key2} işlemi kapatılıyor. Görüşürüz...')
+                            kill_process_tree(process)
+                        except Exception as e:
+                            print(f'Process with pid {process.pid} thrown an exception. Could not kill the process. {e}')
+                            
     sys.exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
 
 # some helper functions
+
+def kill_process_tree(process):
+    # I wish I lived in a world where I could just call process.kill() and be done with it
+    parent = psutil.Process(process.pid)
+    for child in parent.children(recursive=True):
+        child.kill()
+        
+    process.kill()    
+    print(f'Process with PID {process.pid} and its child processes killed.')
 
 ## create a message for the user to see the active processes
 def create_process_list_message(chat_id):
@@ -116,9 +129,9 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
             active_process[chat_id] = {}
         # check if active process have key with chat id
         if chat_id in active_process and process_name in active_process[chat_id]:
-            active_process[chat_id][process_name].append(process.pid)
+            active_process[chat_id][process_name].append(process)
         else:
-            active_process[chat_id][process_name] = [process.pid]
+            active_process[chat_id][process_name] = [process]
             
         print(active_process)
             
@@ -150,6 +163,7 @@ def start(message):
         whoami_message = whoami.read()
         whoami.close()
         bot.send_message(call.message.chat.id, whoami_message)
+        bot.send_photo(call.message.chat.id, photo = 'AgACAgQAAxkDAAIEgWYkV3BKtaeqtdZQLXC4NSB_LF7LAALtwTEbjY8gUYKMYUIbPb_0AQADAgADeQADNAQ', caption='Gerçekte ben.')
         
     @bot.callback_query_handler(func=lambda call: call.data == 'howtowork')
     def howtowork(call):
@@ -215,8 +229,7 @@ def youtube_handler(message):
         bot.send_message(call.message.chat.id, "Klip başlangıç zamanını giriniz: (Örnek: 00:00)")
         hold = [True, True]
         @bot.message_handler(func=lambda message: hold[0])
-        def get_start_time(message, url):
-            print(url)
+        def get_start_time(message):
             start_time = message.text
             hold[0] = False
             bot.send_message(message.chat.id, "Klip bitiş zamanını giriniz: (Örnek: 01:30)")
@@ -332,7 +345,6 @@ def yht_handler(message):
 
                     # call the train search
                     python_file = os.path.join(os.getcwd(), 'yht', 'yht_check.py')
-                    print(python_file)
                     arguments = [token, str(message.chat.id), info['departure_station'], info['arrival_station'], info['date'], info['time']]
                     
                     process_handler(['python', python_file] + arguments, False, 'yht', message.chat.id)
@@ -345,9 +357,12 @@ def yht_cancel_handler(message):
         for process in active_process[message.chat.id]['yht']:
             # kill the process with the pid
             try:
-                os.kill(process, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+               kill_process_tree(process)
+            except ProcessLookupError as e:
+                print('Look up error?')
+                print(e)
+            except Exception as e:
+                print(e)
             active_process[message.chat.id]['yht'].remove(process)
         bot.send_message(message.chat.id, "Tren seferi arama işlemi iptal edildi.")
     else:
@@ -388,7 +403,6 @@ def tts_handler(message):
         return
     
     file_handler(message, out[1], type='audio')
-    os.remove(txt_file)
     
 ## pedro
 @bot.message_handler(commands=['pedro'])

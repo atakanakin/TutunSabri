@@ -1,5 +1,7 @@
 # <center>Tütün Sabri</center>
 
+![Tütün Sabri](https://i.imgur.com/KoYarmr.jpg)
+
 ## Tütün Sabri'nin Hikayesi
 
 Bir zamanlar, sert topraklarında Adıyaman'ın, dağların arasında, yaşlı bir çınar ağacının gölgesinde Tütün Sabri'nin hikayesi başlar. Adı gibi duman duman bir geçmişi olan bu adam, dedesi gibi tütüncüydü. Ve belki de bu yüzden, lakabı Tütün olarak kalmıştı.
@@ -12,15 +14,31 @@ Zorlu geçen gençlik yıllarından sonra, Adıyaman'ın topraklarına kök sald
 
 Ama tüm bu kahramanlık ve fedakarlıkların arasında, kalbinde bir boşluk hissetti Tütün Sabri. Savaşa gitmeden önce, Adıyaman'ın güzel kızlarından birine aşık olmuştu. Onunla evlenme sözü vermişti, ama kader bir kez daha acımasızca müdahale etti. Sevdiğinin babası öldüğünde, ailesi onu savaşın karmaşasından uzaklaştırmak için alıp götürdü. Tütün Sabri, savaştan döndüğünde sevdiği kadını bir daha göremedi. Belki de onu bulmak için yıllarını harcadı, belki de yalnızca yıldızlara bakarak geçirdi ömrünü, umutla bekleyerek. Ancak ne olursa olsun, onun yüreğindeki sevda ve umut, hiç solmadı. Bu da onun hikayesinin bir parçasıydı, geçmişin hatıralarıyla geleceğe doğru ilerlerken.
 
+Gerçekte ben.
+![Tütün Sabri-actual](https://i.imgur.com/OIpUDhX.jpg)
+
 ## Nasıl kullanılır
 
 ## Komutlar
 
-### youtube
+### /start /help /info
+Bot hakkında ve nasıl kullanılacağı hakkında detaylar verir.
 
-### tts
+### /youtube
+Bu komutla bağlantısını verdiğiniz YouTube videosunu, sesi veya aralığını seçtiğiniz klibi indirebilirsiniz. Telegram'da videolar için 50 MB sınırı olduğundan yükleme başarısız olursa video Dropbox'a yüklenir ve size bir indirme bağlantısı sağlanır.
 
-### yht
+### /tts
+Bu komutla girdiğiniz metin ses dosyasına çevrilip size gönderilir. 46'dan fazla dil desteği bulunmaktadır.
 
-### pedro
+### /yht
+Bu komutu girdiğinizde size Kalkış istasyonu, Varış istasyonu, tarih ve zaman gibi parametreler sorulur. Bunları girdikten sonra TCDD YHT bileti için arama yapılmaya başlanır. Bu aşamada kritik detay durak isimlerini TCDD web sitesinde geçtiği gibi girmenizdir. Eğer boş koltuk sayısı değişirse size bir mesaj gönderilir. Aramayı sonlandırmak için __/yhtcancel__ komutunu kullanınız.
+
+### /pedro
+PEDRO
+
+### /twitter
+Çok yakında...
+
+### /mood
+Çok yakında...
 

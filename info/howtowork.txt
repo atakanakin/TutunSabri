@@ -6,8 +6,8 @@ Bu komutla bağlantısını verdiğiniz YouTube videosunu, sesi veya aralığın
 <b>/tts TEXT</b>
 Bu komutla girdiğiniz metin ses dosyasına çevrilip size gönderilir. 46'dan fazla dil desteği bulunmaktadır.
 
-<b>/yht</b>
-Bu komutu girdiğinizde size Kalkış istasyonu, Varış istasyonu, tarih ve zaman gibi parametreler sorulur. Bunları girdikten sonra TCDD YHT bileti için arama yapılmaya başlanır. Bu aşamada kritik detay durak isimlerini TCDD web sitesinde geçtiği gibi girmenizdir. Eğer boş koltuk sayısı değişirse size bir mesaj gönderilir.
+<b>/yht /yhtcancel</b>
+Bu komutu girdiğinizde size Kalkış istasyonu, Varış istasyonu, tarih ve zaman gibi parametreler sorulur. Bunları girdikten sonra TCDD YHT bileti için arama yapılmaya başlanır. Bu aşamada kritik detay durak isimlerini TCDD web sitesinde geçtiği gibi girmenizdir. Eğer boş koltuk sayısı değişirse size bir mesaj gönderilir. Aramayı sonlandırmak için <b>/yhtcancel</b> komutunu kullanınız.
 
 <b>/start /help /info</b>
 Bot hakkında ve nasıl kullanılacağı hakkında detaylar verir.

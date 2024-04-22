@@ -6,7 +6,6 @@ from selenium.webdriver.chrome.options import Options
 import time
 import requests
 import sys
-import signal
 
 #read system arguments
 botToken = sys.argv[1]
@@ -18,12 +17,7 @@ user_hour = sys.argv[6]
 state = -1
 timeout = 30
 
-
-def signal_handler(sig, frame):
-    sendTelegramMessage("YHT Seat Check programı kapatılıyor...")
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
+browser = None
 
 def sendTelegramMessage(message):
     # bot = Bot(token = botToken)
@@ -36,6 +30,7 @@ def sendTelegramMessage(message):
 
 
 def initial_search():
+    global browser
     # Open the browser and go to the website
     options = Options()
     # user agent
@@ -54,13 +49,13 @@ def initial_search():
 
     # nereden
     browser.find_element(By.XPATH, '//*[@id="nereden"]').send_keys(user_nereden)
-    time.sleep(1)
+    time.sleep(4)
     ActionChains(browser).send_keys(Keys.DOWN).send_keys(Keys.RETURN).perform()
     time.sleep(1)
 
     # nereye
     browser.find_element(By.XPATH, '//*[@id="nereye"]').send_keys(user_nereye)
-    time.sleep(1)
+    time.sleep(4)
     ActionChains(browser).send_keys(Keys.DOWN).send_keys(Keys.RETURN).perform()
     time.sleep(1)
 
@@ -75,21 +70,10 @@ def initial_search():
     # ara
     browser.find_element(By.XPATH, '//*[@id="btnSeferSorgula"]/span').click()
 
-    return browser
-
-def get_browser():
-    browser = initial_search()
-    while(browser.current_url == 'https://ebilet.tcddtasimacilik.gov.tr/view/eybis/tnmGenel/tcddWebContent.jsf?expired=true'):
-
-        browser.quit()
-        time.sleep(1)
-        browser = initial_search()
-    return browser
-
-
-
 def check_yht(counter = 0):
-    browser = get_browser()
+    initial_search()
+    
+    global browser
     # Wait for the page to load
     time.sleep(5)
     # Locate the table element
@@ -130,16 +114,17 @@ def check_yht(counter = 0):
     browser.quit()
     time.sleep(1)
 
-counter = 0
+count_error = 0
 while True:
+    if browser != None:
+        browser.quit()
     try:
         check_yht()
-        counter = 0
+        count_error = 0
         time.sleep(timeout)
     except Exception as e:
-        counter += 1
-        
-        if counter > 5:
+        count_error += 1
+        if count_error > 10:
             f = open(f'yht/{chatId}_error.log', 'a+')
             f.write(f'{str(e)}\n\n')
             f.write(f'{time.ctime()}\n\n')
