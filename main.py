@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import random
 import psutil
 import signal
 import telebot
@@ -95,13 +96,16 @@ def file_handler(message, output:str, type: str):
                 
     elif(type == 'video'):
         try:
-            bot.send_video(message.chat.id, video = file, supports_streaming=True, width=1920, height=1080)
+            file_id = bot.send_video(message.chat.id, video = file, supports_streaming=True, width=1920, height=1080)
+            print(file_id.video.file_id) #TODO: Remove this line
         except Exception as e:
             bot.send_message(message.chat.id, f'Video dosyası gönderilemiyor.')
             bot.send_message(message.chat.id, f'Videoyu dropboxa yüklüyorum...')
-            vidUrl = dbu.UpLoadFile('',output)
-            bot.send_message(message.chat.id, text= f'<a href="{vidUrl}">Videoyu indir</a>', parse_mode='HTML')
-            
+            try:
+                vidUrl = dbu.UpLoadFile('',output)
+                bot.send_message(message.chat.id, text= f'<a href="{vidUrl}">Videoyu indir</a>', parse_mode='HTML')
+            except Exception as dropboxError:
+                bot.send_message(message.chat.id, f'Dropboxa yüklenirken bir hata oluştu.')
     file.close()
     os.remove(output)
     
@@ -134,6 +138,22 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
             active_process[chat_id][process_name] = [process]
             
         print(active_process)
+        
+        
+def spor_helper(chatId):
+    global bot
+    bot.send_message(chatId, "Lütfen seans saat bilgisini giriniz: (Örnek: 19:35 - 20:55)")
+    timeHold = [True]
+    @bot.message_handler(func=lambda message: timeHold[0])
+    def get_time(message):
+        desiredTime = message.text
+        timeHold[0] = False
+        bot.send_message(message.chat.id, "Program başlatılıyor...\nLütfen bekleyin.")
+        # call the reservation
+        python_file = os.path.join(os.getcwd(), 'spor', 'main.py')
+        arguments = [str(message.chat.id), token, desiredTime]
+        
+        process_handler(['python', python_file] + arguments, False, 'spor', message.chat.id)
             
 # command handlers
 
@@ -415,6 +435,7 @@ def spor_handler(message):
         config = json.load(f)
         f.close()
         bot.send_message(message.chat.id, f'{config["username"]} kullanıcısı ile işlem yapılacak.')
+        spor_helper(message.chat.id)
     else:
         # ask for credentials
         bot.send_message(message.chat.id, "Rezervasyon yapmak için lütfen kullanıcı adınızı giriniz: (Örnek: e123456)")
@@ -434,22 +455,7 @@ def spor_handler(message):
                 }
                 with open(user_credential_path, 'w') as f:
                     json.dump(credentials, f)
-    
-    bot.send_message(message.chat.id, "Lütfen seans saat bilgisini giriniz: (Örnek: 19:35 - 20:55)")
-    desiredTime = None
-    timeHold = True
-    @bot.message_handler(func=lambda message: timeHold)
-    def get_time(message):
-        global desiredTime
-        desiredTime = message.text
-        timeHold = False
-        bot.send_message(message.chat.id, "Program başlatılıyor...\nLütfen bekleyin.")
-        # call the reservation
-        python_file = os.path.join(os.getcwd(), 'spor', 'main.py')
-        arguments = [str(message.chat.id), token, desiredTime]
-        
-        process_handler(['python', python_file] + arguments, False, 'spor', message.chat.id)
-        
+                spor_helper(message.chat.id)
 
 ## cancel the spor reservation
 @bot.message_handler(commands=['sporcancel'])
@@ -477,6 +483,17 @@ def spor_cancel_handler(message):
             
     print(active_process)
     
+## mood
+@bot.message_handler(commands=['mood'])
+def mood_handler(message):
+    # get video file id's from file
+    with open(os.path.join(os.getcwd(), 'mood', 'mood.json'), 'r') as f:
+        mood = json.load(f)
+    video_ids = mood['video_ids']
+    # choose a random video,
+    video_id = random.choice(video_ids)
+    # send the video
+    bot.send_video(message.chat.id, video = video_id, supports_streaming=True, width=1920, height=1080)
     
     
 ## pedro

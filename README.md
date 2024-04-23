@@ -4,7 +4,7 @@
 
 ## Tütün Sabri'nin Hikayesi
 
-Bir zamanlar, sert topraklarında Adıyaman'ın, dağların arasında, yaşlı bir çınar ağacının gölgesinde Tütün Sabri'nin hikayesi başlar. Adı gibi duman duman bir geçmişi olan bu adam, dedesi gibi tütüncüydü. Ve belki de bu yüzden, lakabı Tütün olarak kalmıştı.
+Bir zamanlar, sert topraklarında Adıyaman'ın, dağların arasında, yaşlı bir çınar ağacının gölgesinde Tütün Sabri'nin hikayesi başlar.
 
 Kurtuluş Savaşı'nın sıcak günlerinde, toprağın altında kök salmış bir direnişçi olarak yetişti Tütün Sabri. Gençliği, kahramanlıkla değil, belalarla ve illegal işlerle doluydu. Kimilerine göre bir serseri, kimilerine göre ise cesur bir maceraperestti. Ama asıl tanınışı, vatan sevgisi uğruna gösterdiği fedakarlıklarla oldu.
 
@@ -40,5 +40,5 @@ PEDRO
 Çok yakında...
 
 ### /mood
-Çok yakında...
+Önceden seçilmiş videolar arasından random bir video gönderir. mood klasörü altında mood.json dosyasına göz atabilirsiniz.
 

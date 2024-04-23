@@ -13,7 +13,10 @@ Bu komutu girdiğinizde size Kalkış istasyonu, Varış istasyonu, tarih ve zam
 Bot hakkında ve nasıl kullanılacağı hakkında detaylar verir.
 
 <b>/spor /sporcancel</b>
-
+ODTÜ Spor Merkezi için alarm oluşturur. Komut girildiğinde kullanıcı daha önce giriş yapmadıysa username ve password sorulur. Bir kez giriş yapıldığında sadece seans bilgisi sorulur. Alarmı durdurmak için <b>/sporcancel</b> komutunu kullanınız.
 
 <b>/pedro</b>
 PEDRO
+
+<b>/mood</b>
+Önceden hazırlanmış bir playlistten random bir video yönlendirir.
