@@ -13,8 +13,12 @@ from dropbox_helper import DropBoxUpload
 active_process = {}
 youtube_urls = {}
 
+class CustomPopen(subprocess.Popen):
+    def __str__(self) -> str:
+        return f'PID: {self.pid}, Command: {self.args}'
+
 # read the bot token from the json file
-with open('conff.json') as f:
+with open('bot_config.json') as f:
     data = json.load(f)
     token = data['bot_token']
     dropbox_token = data['dropbox_token']
@@ -32,9 +36,8 @@ def signal_handler(sig, frame):
     global owner_id
     global bot
     global active_process
-    #bot.send_message(owner_id, "Program kapatılıyor.") TODO: Uncomment this line
+    bot.send_message(owner_id, "Program kapatılıyor.")
     # kill all active processes
-    print(active_process)
     if(len(active_process) > 0):
         for key, value in active_process.items():
             if(len(value) > 0):
@@ -44,7 +47,7 @@ def signal_handler(sig, frame):
                             bot.send_message(key, f'{key2} işlemi kapatılıyor. Görüşürüz...')
                             kill_process_tree(process)
                         except Exception as e:
-                            print(f'Process with pid {process.pid} thrown an exception. Could not kill the process. {e}')
+                            print(f'Process with pid {process.pid} thrown an exception. Could not kill the process. {e}', flush=True)
                             
     sys.exit(0)
 
@@ -59,7 +62,7 @@ def kill_process_tree(process):
         child.kill()
         
     process.kill()    
-    print(f'Process with PID {process.pid} and its child processes killed.')
+    print(f'Process with PID {process.pid} and its child processes killed.', flush=True)
 
 ## create a message for the user to see the active processes
 def create_process_list_message(chat_id):
@@ -112,7 +115,7 @@ def file_handler(message, output:str, type: str):
     
 ## create and run a process
 def process_handler(executable: list, wait_to_finish: bool, process_name: str, chat_id):
-    process = subprocess.Popen(executable,
+    process = CustomPopen(executable,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
         
@@ -138,7 +141,6 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
         else:
             active_process[chat_id][process_name] = [process]
             
-        print(active_process)
         
         
 def spor_helper(chatId):
@@ -428,6 +430,10 @@ def yht_cancel_handler(message):
             except Exception as e:
                 print(e)
             active_process[message.chat.id]['yht'].remove(process)
+            if(len(active_process[message.chat.id]['yht']) == 0):
+                del active_process[message.chat.id]['yht']
+            if(len(active_process[message.chat.id]) == 0):
+                del active_process[message.chat.id]
         bot.send_message(message.chat.id, "Tren seferi arama işlemi iptal edildi.")
     else:
         bot.send_message(message.chat.id, "Aktif bir tren seferi arama işlemi bulunamadı.")
@@ -437,8 +443,6 @@ def yht_cancel_handler(message):
         if(len(user_jobs) > 0):
             bot.send_message(message.chat.id, user_jobs)
             
-    print(active_process)
-                         
 
 ## text to speech
 @bot.message_handler(commands=['tts'])
@@ -522,6 +526,10 @@ def spor_cancel_handler(message):
             except Exception as e:
                 print(e)
             active_process[message.chat.id]['spor'].remove(process)
+            if(len(active_process[message.chat.id]['spor']) == 0):
+                del active_process[message.chat.id]['spor']
+            if(len(active_process[message.chat.id]) == 0):
+                del active_process[message.chat.id]
         bot.send_message(message.chat.id, "Spor salonu rezervasyon işlemi iptal edildi.")
     else:
         bot.send_message(message.chat.id, "Aktif bir spor salonu rezervasyon işlemi bulunamadı.")
@@ -531,7 +539,6 @@ def spor_cancel_handler(message):
         if(len(user_jobs) > 0):
             bot.send_message(message.chat.id, user_jobs)
             
-    print(active_process)
     
 ## mood
 @bot.message_handler(commands=['mood'])
@@ -572,7 +579,6 @@ def requests_handler(message):
     for request in requests:
         f = open(os.path.join(os.getcwd(), 'requests', request), 'r', encoding='utf-8')
         user_info = f.read().strip().split('\n')
-        print(user_info)
         f.close()
         bot.send_message(message.chat.id, f'Kullanıcı: {user_info[0]} @{user_info[1]} ({user_info[2]})\nTarih: {user_info[3]}')
         bot.send_message(message.chat.id, f'Kullanıcıya yetki vermek için /grant {user_info[2]} komutunu kullanabilirsiniz.')
@@ -603,12 +609,65 @@ def grant_handler(message):
     # remove the request file
     os.remove(request_file)
     # add the user to the white list file
-    with open('conff.json', 'w') as f: # TODO: change the file name   
+    with open('bot_config.json', 'w') as f:
         data['white_list'] = whitelist
         json.dump(data, f)
     # send a message to the user
     bot.send_message(int(user_info[2]), "Yetkiniz verildi. Artık botu kullanabilirsiniz.")
     bot.send_message(message.chat.id, f'Kullanıcı yetkisi verildi: {user_info[0]} @{user_info[1]} ({user_info[2]})')
+    
+## revoke access
+@bot.message_handler(commands=['revoke'])
+def revoke_handler(message):
+    global data
+    if not access_control(message.chat.id, admin=True):
+        return
+    # get the user id from the message text
+    try:
+        user_id = message.text.split(' ', 1)[1]
+    except IndexError:
+        bot.reply_to(message, "Hata: Lütfen bir kullanıcı id'si giriniz.")
+        return
+    # check if the user id is in the white list
+    global whitelist
+    if user_id not in whitelist:
+        bot.reply_to(message, "Hata: Kullanıcı zaten yetkili değil.")
+        return
+    # remove the user from the white list
+    whitelist.remove(user_id)
+    # add the user to the white list file
+    with open('bot_config.json', 'w') as f:
+        data['white_list'] = whitelist
+        json.dump(data, f)
+    # send a message to the user
+    bot.send_message(int(user_id), "Yetkiniz alındı. Artık botu kullanamazsınız.")
+    bot.send_message(message.chat.id, f'Kullanıcı yetkisi geri alındı: {user_id}')
+    
+## list users
+@bot.message_handler(commands=['listusers'])
+def listusers_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    global whitelist
+    for user in whitelist:
+        bot.send_message(message.chat.id, f'[Kullanıcı](tg://user?id={user})', parse_mode='Markdown')
+        
+## list active processes
+@bot.message_handler(commands=['process'])
+def process_message_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    global active_process
+    
+    # if there is no active process
+    if(len(active_process) == 0):
+        bot.send_message(message.chat.id, "Şu anda hiçbir işlem çalışmıyor.")
+        return
+    
+    for key, value in active_process.items():
+        for key2, value2 in value.items():
+            for process in value2:
+                bot.send_message(message.chat.id, f'user: {key}, process: {str(process)}')
     
 
 # Start the bot
