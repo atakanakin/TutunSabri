@@ -7,7 +7,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 import selenium.webdriver.support.select as select
-from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.chrome.options import Options
 
 chatId = sys.argv[1]
 botToken = sys.argv[2]

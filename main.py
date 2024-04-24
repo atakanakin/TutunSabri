@@ -14,11 +14,12 @@ active_process = {}
 youtube_urls = {}
 
 # read the bot token from the json file
-with open('bot_config.json') as f:
+with open('conff.json') as f:
     data = json.load(f)
     token = data['bot_token']
     dropbox_token = data['dropbox_token']
     owner_id = data['owner_id']
+    whitelist = data['white_list']
     
 # create a dropbox upload object
 dbu = DropBoxUpload(dropbox_token)
@@ -155,6 +156,41 @@ def spor_helper(chatId):
         
         process_handler(['python', python_file] + arguments, False, 'spor', message.chat.id)
             
+# check if the user is in the white list
+def access_control(chat_id, admin: bool = False):
+    global whitelist, bot, owner_id
+    chat_id = str(chat_id)
+    if chat_id == owner_id:
+        return True
+    elif chat_id in whitelist and not admin:
+        return True
+    elif chat_id in whitelist and admin:
+        bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Bu işlemi sadece [@atakan](tg://user?id={owner_id}) yapabilir.', parse_mode='Markdown')
+        return False
+    else:
+        # inline keyboard markup
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        request_button = types.InlineKeyboardButton("Yetki İste  \U0001F6A7", callback_data='request')
+        cancel_button = types.InlineKeyboardButton("İptal  \U0000274C", callback_data='cancel')
+        keyboard.add(request_button, cancel_button)
+        bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Botu kullanabilmek için [@atakan](tg://user?id={owner_id}) kullanıcısından yetki isteyebilirsiniz.', parse_mode='Markdown', reply_markup=keyboard)
+        # handle the callback
+        @bot.callback_query_handler(func=lambda call: call.data == 'request')
+        def request(call):
+            #bot.send_message(owner_id, f'[{call.message.chat.username}](tg://user?id={call.message.chat.id}) kullanıcısı yetki istiyor.', parse_mode='Markdown')
+            # log the request
+            request_file = os.path.join(os.getcwd(), 'requests', f'{call.message.chat.id}.txt')
+            f = open(request_file, 'w')
+            # log first name, last name, username, chat id, date
+            f.write(f'{call.message.chat.first_name} {call.message.chat.last_name}\n{call.message.chat.username}\n{call.message.chat.id}\n{call.message.date}')
+            f.close()            
+            bot.send_message(call.message.chat.id, "Yetki isteğiniz gönderildi. Lütfen bekleyin.")
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
+        def cancel(call):
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        return False
+    
 # command handlers
 
 ## start, help, info
@@ -203,6 +239,8 @@ def start(message):
 ## youtube
 @bot.message_handler(commands=['youtube'])
 def youtube_handler(message):
+    if not access_control(message.chat.id):
+        return
     # Extract the YouTube URL from the message text
     try:
         youtube_url = message.text.split(' ', 1)[1]
@@ -300,6 +338,8 @@ def youtube_handler(message):
 ## twitter
 @bot.message_handler(commands=['twitter'])
 def twitter_handler(message):
+    if not access_control(message.chat.id):
+        return
     # if user has credentials
     credentials = None
     user_credential_path = os.path.join(os.getcwd(), 'credentials', 'twitter', f'{message.chat.id}.json')
@@ -331,6 +371,8 @@ def twitter_handler(message):
 ## YHT Train
 @bot.message_handler(commands=['yht'])
 def yht_handler(message):
+    if not access_control(message.chat.id):
+        return
     global active_process
     # ask for 2 cities
     info = None
@@ -372,6 +414,8 @@ def yht_handler(message):
 ## cancel the yht search
 @bot.message_handler(commands=['yhtcancel'])
 def yht_cancel_handler(message):
+    if not access_control(message.chat.id):
+        return
     global active_process
     if message.chat.id in active_process and 'yht' in active_process[message.chat.id]:
         for process in active_process[message.chat.id]['yht']:
@@ -399,6 +443,8 @@ def yht_cancel_handler(message):
 ## text to speech
 @bot.message_handler(commands=['tts'])
 def tts_handler(message):
+    if not access_control(message.chat.id):
+        return
     # Extract the text from the message text
     try:
         text = message.text.split(' ', 1)[1]
@@ -428,6 +474,8 @@ def tts_handler(message):
 ## spor
 @bot.message_handler(commands=['spor'])
 def spor_handler(message):
+    if not access_control(message.chat.id):
+        return
     # check if the user has credentials
     user_credential_path = os.path.join(os.getcwd(), 'credentials', 'rezmetu', f'{message.chat.id}.json')
     if(os.path.exists(user_credential_path)):
@@ -460,6 +508,8 @@ def spor_handler(message):
 ## cancel the spor reservation
 @bot.message_handler(commands=['sporcancel'])
 def spor_cancel_handler(message):
+    if not access_control(message.chat.id):
+        return
     global active_process
     if message.chat.id in active_process and 'spor' in active_process[message.chat.id]:
         for process in active_process[message.chat.id]['spor']:
@@ -486,6 +536,8 @@ def spor_cancel_handler(message):
 ## mood
 @bot.message_handler(commands=['mood'])
 def mood_handler(message):
+    if not access_control(message.chat.id):
+        return
     # get video file id's from file
     with open(os.path.join(os.getcwd(), 'mood', 'mood.json'), 'r') as f:
         mood = json.load(f)
@@ -499,7 +551,65 @@ def mood_handler(message):
 ## pedro
 @bot.message_handler(commands=['pedro'])
 def pedro_handler(message):
+    if not access_control(message.chat.id):
+        return
     bot.send_video(message.chat.id, video = 'BAACAgQAAxkDAAIEI2YkHfk_t10R31SISqYxWk27VaDcAAJGEwACwmwgUZ6kBxvyfD_UNAQ', supports_streaming=True, width=1920, height=1080)
+
+
+# admin commands
+
+## get requests
+@bot.message_handler(commands=['requests'])
+def requests_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    # get all request files
+    requests = os.listdir(os.path.join(os.getcwd(), 'requests'))
+    requests = [request for request in requests if request.endswith('.txt')]
+    if(len(requests) == 0):
+        bot.send_message(message.chat.id, "Henüz hiçbir yetki isteği bulunmamaktadır.")
+        return
+    for request in requests:
+        f = open(os.path.join(os.getcwd(), 'requests', request), 'r', encoding='utf-8')
+        user_info = f.read().strip().split('\n')
+        print(user_info)
+        f.close()
+        bot.send_message(message.chat.id, f'Kullanıcı: {user_info[0]} @{user_info[1]} ({user_info[2]})\nTarih: {user_info[3]}')
+        bot.send_message(message.chat.id, f'Kullanıcıya yetki vermek için /grant {user_info[2]} komutunu kullanabilirsiniz.')
+            
+## grant access
+@bot.message_handler(commands=['grant'])
+def grant_handler(message):
+    global data
+    if not access_control(message.chat.id, admin=True):
+        return
+    # get the user id from the message text
+    try:
+        user_id = message.text.split(' ', 1)[1]
+    except IndexError:
+        bot.reply_to(message, "Hata: Lütfen bir kullanıcı id'si giriniz.")
+        return
+    # check if the user id is in the requests
+    request_file = os.path.join(os.getcwd(), 'requests', f'{user_id}.txt')
+    if not os.path.exists(request_file):
+        bot.reply_to(message, "Hata: Kullanıcı isteği bulunamadı.")
+        return
+    # get the user info
+    with open(request_file, 'r', encoding='utf-8') as f:
+        user_info = f.readlines()
+    # add the user to the white list
+    global whitelist
+    whitelist.append(user_info[2].strip('\n'))
+    # remove the request file
+    os.remove(request_file)
+    # add the user to the white list file
+    with open('conff.json', 'w') as f: # TODO: change the file name   
+        data['white_list'] = whitelist
+        json.dump(data, f)
+    # send a message to the user
+    bot.send_message(int(user_info[2]), "Yetkiniz verildi. Artık botu kullanabilirsiniz.")
+    bot.send_message(message.chat.id, f'Kullanıcı yetkisi verildi: {user_info[0]} @{user_info[1]} ({user_info[2]})')
+    
 
 # Start the bot
 bot.polling()
