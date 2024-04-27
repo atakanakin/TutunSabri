@@ -668,7 +668,32 @@ def process_message_handler(message):
         for key2, value2 in value.items():
             for process in value2:
                 bot.send_message(message.chat.id, f'user: {key}, process: {str(process)}')
+                
+## selfie
+@bot.message_handler(commands=['selfie'])
+def selfie_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    bot.send_message(message.chat.id, "Fotoğraf çekiliyor...\nLütfen bekleyin.")
+    # call the selfie
+    python_file = os.path.join(os.getcwd(), 'selfie', 'take_picture.py')
+    arguments = [os.path.join(os.getcwd(), 'selfie', f'{message.chat.id}.jpg')]
     
+    process_handler(['python', python_file] + arguments, True, 'selfie', message.chat.id)
+    
+    # send the photo
+    bot.send_photo(message.chat.id, photo = open(arguments[0], 'rb'))
+    
+    # remove the photo
+    os.remove(arguments[0])
+
+    
+## exit
+@bot.message_handler(commands=['exit'])
+def exit_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    signal_handler(signal.SIGINT, None)
 
 # Start the bot
 bot.polling()
