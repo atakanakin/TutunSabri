@@ -12,6 +12,7 @@ from dropbox_helper import DropBoxUpload
 # global variables
 active_process = {}
 youtube_urls = {}
+usernames = {}
 
 class CustomPopen(subprocess.Popen):
     def __str__(self) -> str:
@@ -719,6 +720,7 @@ def selfie_handler(message):
 ## instagram - for now only for personal use
 @bot.message_handler(commands=['instagram'])
 def instagram_handler(message):
+    global usernames, token
     if not access_control(message.chat.id, admin=True):
         return
     # credentials folder
@@ -731,27 +733,148 @@ def instagram_handler(message):
     for folder in folders:
         button = types.InlineKeyboardButton(folder, callback_data=folder)
         keyboard.add(button)
+    add_button = types.InlineKeyboardButton("Yeni Kullanıcı Ekle  \U0001F64B", callback_data='add_account')
+    keyboard.add(add_button)
     # send the message
-    bot.send_message(message.chat.id, "Lütfen bir kullanıcı seçiniz.", reply_markup=keyboard)
+    bot.send_message(message.chat.id, "Lütfen bir kullanıcı seçin veya yeni bir kullanıcı ekleyin (Giriş yapılan hesabı güncellemek için yeni bir kullanıcı ekleyebilirsiniz, bu seçenek varolan hesabı overwrite eder.).", reply_markup=keyboard)
     
     @bot.callback_query_handler(func=lambda call: call.data in folders)
     def instagram_user(call):
-        # send the message
-        bot.send_message(call.message.chat.id, f'{call.data} kullanıcısı ile giriş yapıldı.')
         # delete the message
         bot.delete_message(call.message.chat.id, call.message.message_id)
-        # call the instagram
-        python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
         
-        arguments = [token, str(call.message.chat.id), f'{call.data}', os.path.join(os.getcwd(), 'credentials', 'instagram')]
+        # send the message
+        options = types.InlineKeyboardMarkup(row_width=2)
+        upload_reel_button = types.InlineKeyboardButton("Reel Yükle  \U0001F4F7", callback_data='upload_reel')
+        download_reel_button = types.InlineKeyboardButton("Reel İndir  \U0001F4E5", callback_data='download_reel')
+        options.add(upload_reel_button, download_reel_button)
+        bot.send_message(call.message.chat.id, f'{call.data} kullanıcısı ile işlem yapılacak.', reply_markup=options)
+        usernames[str(call.message.chat.id)] = call.data
         
-        out = process_handler(['python', python_file] + arguments, True, 'instagram', call.message.chat.id)
-        
-        if(not out[0]):
-            bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
-            return
-    
+        @bot.callback_query_handler(func=lambda call: call.data == 'upload_reel')
+        def upload_reel(call):
+            # delete the message
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+            bot.send_message(call.message.chat.id, "Lütfen bekleyin.")
 
+            # call the instagram
+            python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
+            
+            arguments = [
+                "--mode", "upload_reel",
+                "--username", usernames[str(call.message.chat.id)],
+                "--chat_id", str(call.message.chat.id),
+                "--token", token,
+                "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
+            ]
+            
+            out = process_handler(['python', python_file] + arguments, True, 'instagram', call.message.chat.id)
+            if(not out[0]):
+                bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
+                return
+            
+        @bot.callback_query_handler(func=lambda call: call.data == 'download_reel')
+        def download_reel(call):
+            # delete the message
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+            bot.send_message(call.message.chat.id, "Lütfen bekleyin.")
+            
+            download_options = types.InlineKeyboardMarkup(row_width=2)
+            hashtag_top_button = types.InlineKeyboardButton("Hashtag's Top Reels  \U0001F4F7", callback_data='hashtag_top')
+            hashtag_recent_button = types.InlineKeyboardButton("Hashtag's Recent Reels  \U0001F4E5", callback_data='hashtag_new')
+            user_button = types.InlineKeyboardButton("User's Reel  \U0001F4E5", callback_data='user')
+            bot.send_message(call.message.chat.id, "İndirme seçeneklerinden birini seçiniz.", reply_markup=download_options)
+            
+            @bot.callback_query_handler(func=lambda call: (call.data).split('_')[0] == 'hashtag')
+            def hashtag_top(call):
+                # delete the message
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.send_message(call.message.chat.id, "Lütfen hashtag ismini yazınız.")
+                
+                hold = [True]
+                @bot.message_handler(func=lambda message: hold[0])
+                def get_hashtag(message):
+                    hashtag = message.text
+                    hold[0] = False
+                    bot.send_message(message.chat.id, "Lütfen bekleyin.")
+                    # call the instagram
+                    python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
+                    arguments = [
+                        "--mode", "download_reel",
+                        "--download_mode", call.data,
+                        "--download_hashtag", hashtag,
+                        "--username", usernames[str(call.message.chat.id)],
+                        "--chat_id", str(call.message.chat.id),
+                        "--token", token,
+                        "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
+                    ]
+                    
+                    out = process_handler(['python', python_file] + arguments, True, 'instagram', call.message.chat.id)
+                    if(not out[0]):
+                        bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
+                        return
+            
+            @bot.callback_query_handler(func=lambda call: call.data == 'user')
+            def user_reel(call):
+                # delete the message
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.send_message(call.message.chat.id, "Lütfen kullanıcı adını yazınız.")
+                
+                hold = [True]
+                @bot.message_handler(func=lambda message: hold[0])
+                def get_username(message):
+                    username = message.text
+                    hold[0] = False
+                    bot.send_message(message.chat.id, "Lütfen bekleyin.")
+                    # call the instagram
+                    python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
+                    arguments = [
+                        "--mode", "download_reel",
+                        "--download_mode", call.data,
+                        "--download_user", username,
+                        "--username", usernames[str(call.message.chat.id)],
+                        "--chat_id", str(call.message.chat.id),
+                        "--token", token,
+                        "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
+                    ]
+                    
+                    out = process_handler(['python', python_file] + arguments, True, 'instagram', call.message.chat.id)
+                    if(not out[0]):
+                        bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
+                        return
+            
+    @bot.callback_query_handler(func=lambda call: call.data == 'add_account')
+    def add_user(call):
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        bot.send_message(call.message.chat.id, "Kullanıcı adınızı giriniz:")
+        hold = [True, True]
+        @bot.message_handler(func=lambda message: hold[0])
+        def get_username(message):
+            username = message.text
+            hold[0] = False
+            bot.send_message(message.chat.id, "Şifrenizi giriniz:")
+            @bot.message_handler(func=lambda message: hold[1])
+            def get_password(message):
+                password = message.text
+                hold[1] = False
+
+                instagram_path = os.path.join(os.getcwd(), 'credentials', 'instagram')
+                
+                bot.send_message(message.chat.id, f'{username} kullanıcısı ekleniyor.')
+                
+                python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
+                arguments = [
+                    "--mode", "add_account",
+                    "--username", username,
+                    "--password", password,
+                    "--chat_id", str(message.chat.id),
+                    "--token", token,
+                    "--directory", instagram_path,
+                ]
+                out = process_handler(['python', python_file] + arguments, True, 'instagram', message.chat.id)
+                if(not out[0]):
+                    bot.send_message(message.chat.id, f'Bir sorun oluştu: {out[1]}')
+                    return
     
 ## exit
 @bot.message_handler(commands=['exit'])
