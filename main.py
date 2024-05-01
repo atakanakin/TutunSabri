@@ -669,6 +669,35 @@ def process_message_handler(message):
             for process in value2:
                 bot.send_message(message.chat.id, f'user: {key}, process: {str(process)}')
                 
+## kill process with pid
+@bot.message_handler(commands=['kill'])
+def kill_process_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    # get the pid from the message text
+    try:
+        pid = int(message.text.split(' ', 1)[1])
+    except IndexError:
+        bot.reply_to(message, "Hata: Lütfen bir pid giriniz.")
+        return
+    except ValueError:
+        bot.reply_to(message, "Hata: Lütfen geçerli bir pid giriniz.")
+        return
+    # kill the process
+    try:
+        # find the process from the pid
+        global active_process
+        for key, value in active_process.items():
+            for key2, value2 in value.items():
+                for process in value2:
+                    if(process.pid == pid):
+                        kill_process_tree(process)
+                        bot.send_message(key, f'{key2} işlemi kapatıldı.')
+                        bot.send_message(message.chat.id, f'Process with pid {pid} killed.')
+                        return
+    except Exception as e:
+        bot.send_message(message.chat.id, f'Hata: {e}')
+                
 ## selfie
 @bot.message_handler(commands=['selfie'])
 def selfie_handler(message):
