@@ -686,6 +686,42 @@ def selfie_handler(message):
     
     # remove the photo
     os.remove(arguments[0])
+    
+## instagram - for now only for personal use
+@bot.message_handler(commands=['instagram'])
+def instagram_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    # credentials folder
+    credentials_folder = os.path.join(os.getcwd(), 'credentials', 'instagram')
+    # list all the folders
+    folders = [folder for folder in os.listdir(credentials_folder) if os.path.isdir(os.path.join(credentials_folder, folder))]
+    # create a keyboard
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    # add the folders to the keyboard
+    for folder in folders:
+        button = types.InlineKeyboardButton(folder, callback_data=folder)
+        keyboard.add(button)
+    # send the message
+    bot.send_message(message.chat.id, "Lütfen bir kullanıcı seçiniz.", reply_markup=keyboard)
+    
+    @bot.callback_query_handler(func=lambda call: call.data in folders)
+    def instagram_user(call):
+        # send the message
+        bot.send_message(call.message.chat.id, f'{call.data} kullanıcısı ile giriş yapıldı.')
+        # delete the message
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        # call the instagram
+        python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
+        
+        arguments = [token, str(call.message.chat.id), f'{call.data}', os.path.join(os.getcwd(), 'credentials', 'instagram')]
+        
+        out = process_handler(['python', python_file] + arguments, True, 'instagram', call.message.chat.id)
+        
+        if(not out[0]):
+            bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
+            return
+    
 
     
 ## exit
