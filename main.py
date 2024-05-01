@@ -783,6 +783,7 @@ def instagram_handler(message):
             hashtag_top_button = types.InlineKeyboardButton("Hashtag's Top Reels  \U0001F4F7", callback_data='hashtag_top')
             hashtag_recent_button = types.InlineKeyboardButton("Hashtag's Recent Reels  \U0001F4E5", callback_data='hashtag_new')
             user_button = types.InlineKeyboardButton("User's Reel  \U0001F4E5", callback_data='user')
+            download_options.add(hashtag_top_button, hashtag_recent_button, user_button)
             bot.send_message(call.message.chat.id, "İndirme seçeneklerinden birini seçiniz.", reply_markup=download_options)
             
             @bot.callback_query_handler(func=lambda call: (call.data).split('_')[0] == 'hashtag')

@@ -55,7 +55,8 @@ def add_account(username :str, password :str, verification_code :str, directory:
     # dump the username and password to the folder
     with open(os.path.join(directory, "credentials.json"), "w", encoding='utf-8') as f:
         json.dump({"username": username, "password": password}, f, ensure_ascii=False)
-
+        
+    send_telegram_message(f'{username} kullanıcısı eklendi.')
 
 def usual_login(settings_path: str, username: str, password: str):
     cl = instagrapi.Client(logger= logging.getLogger("SM-A035M"), delay_range= [3, 7], request_timeout=5)
@@ -129,10 +130,10 @@ def download_reel(username: str, download_mode: str, download_hashtag: str, down
     
     if temp[0] == 'hashtag':
         if temp[1] == 'top':
-            clips = cl.hashtag_medias_top(download_hashtag, amount=limitation)
+            clips = cl.hashtag_medias_top(download_hashtag, amount=limitation*2)
             temp_clips = [x.id for x in clips if x.media_type == 2 and x.product_type == 'clips']
         elif temp[1] == 'new':
-            clips = cl.hashtag_medias_recent(download_hashtag, amount=limitation)
+            clips = cl.hashtag_medias_recent(download_hashtag, amount=limitation*2)
             temp_clips = [x.id for x in clips if x.media_type == 2 and x.product_type == 'clips']
     
     else:
@@ -163,16 +164,16 @@ argparser.add_argument("--download_hashtag", help="Hashtag to download reels", r
 argparser.add_argument("--download_user", help="Username to download reels", required=False, type=str)
 argparser.add_argument("--username", help="Instagram username", required=True, type=str)
 argparser.add_argument("--password", help="Instagram password", required=False, type=str)
-argparser.add_argument("--user_id", help="Telegram user id", required=True, type=str)
-argparser.add_argument("--bot_token", help="Telegram bot token", required=True, type=str)
+argparser.add_argument("--chat_id", help="Telegram user id", required=True, type=str)
+argparser.add_argument("--token", help="Telegram bot token", required=True, type=str)
 argparser.add_argument("--directory", help="Directory to store the settings and credentials", required=True, type=str)
 
 args = argparser.parse_args()
 mode = args.mode
 username = args.username
 password = args.password
-user_id = args.user_id
-bot_token = args.bot_token
+user_id = args.chat_id
+bot_token = args.token
 directory = args.directory
     
 main_directory = os.path.join(directory, username)
@@ -203,13 +204,36 @@ elif mode == 'upload_reel':
     if len(videos) == 0:
         send_telegram_message('Reel yüklenemedi. Lütfen video ekleyin.')
         sys.exit(7)
-            
+
     # if there is no caption
     if len(captions) == 0:
         captions.append(None)
     # choose a random video and caption
     video = random.choice(videos)
     caption = random.choice(captions)
+
+    # TODO: Remove this if statement, this part only for my personal project
+    if username == 'daily.random.duck':
+        captions.sort()
+        
+        f = open(captions[0], 'r', encoding='utf-8')
+        count = f.read()
+        f.close()
+        
+        count = int(count)
+        f = open(captions[0], 'w', encoding='utf-8')    
+        f.write(str(count + 1))
+        f.close()
+        
+        f = open(captions[1], 'r', encoding='utf-8')
+        template = f.read()
+        f.close()
+        template = template.replace(str(count - 1), str(count))
+        
+        f = open(captions[1], 'w', encoding='utf-8')
+        f.write(template)
+        f.close()
+        caption = captions[1]
 
     upload_reel(username, video, caption, main_directory)
 
