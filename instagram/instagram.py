@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import json
 import random
 import logging
@@ -203,7 +204,7 @@ elif mode == 'upload_reel':
     # if there is no video
     if len(videos) == 0:
         send_telegram_message('Reel yüklenemedi. Lütfen video ekleyin.')
-        sys.exit(7)
+        raise Exception('Reel yüklenemedi. Hiç video yok.')
 
     # if there is no caption
     if len(captions) == 0:
@@ -211,7 +212,41 @@ elif mode == 'upload_reel':
     # choose a random video and caption
     video = random.choice(videos)
     caption = random.choice(captions)
+    
+    file_stats = os.stat(video)
+    video_size = file_stats.st_size / (1024 * 1024)
+    
+    if video_size > 49:
+        send_telegram_message('Video boyutu çok yüksek. Video preview gönderilemiyor.')
+        
+    else:   
+        # send video and caption to the user and ask for confirmation
+        # use sendVideo endpoint
+        send_telegram_message('Reel yüklemek istediğinizden emin misiniz? Video size ulaştıktan sonra seçim yapmak için 20 saniyeniz var. Eğer yüklemek istemiyorsanız aşağıdaki komutu kullanabilirsiniz. Hiçbir şey yapmazsanız video yüklenecektir.')
+        send_telegram_message(f'/kill {os.getpid()}')
+        url = f'https://api.telegram.org/bot{bot_token}/sendVideo'
+        f_video = open(video, 'rb')
+        f_caption = open(caption, 'r', encoding='utf-8')
 
+        data = {
+            'chat_id': user_id,
+            'video': f_video,
+            'caption': f_caption.read(),
+            'height': '1080',
+            'width': '1920',
+            'supports_streaming': True
+        }
+        f_video.close()
+        f_caption.close()
+        response = requests.post(url, data=data)
+        
+        # check if the response is successful
+        if response.status_code != 200:
+            send_telegram_message('Video gönderilemedi. Video yüklenecek.')
+            
+        else:
+            time.sleep(20)
+    
     # TODO: Remove this if statement, this part only for my personal project
     if username == 'daily.random.duck':
         captions.sort()

@@ -147,20 +147,21 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
         else:
             active_process[chat_id][process_name] = [process]
             
-        if process_name == 'gramaddict':
+        if process_name in ['gramaddict', 'instagram']:
             stdout, stderr = process.communicate()
             # check return code
             if process.returncode != 0:
                 bot.send_message(chat_id, f'Bir hata oluştu: {process.returncode}')
             stdout_str = stdout.decode('utf-8')
-            output = stdout_str.strip().split('\n')
-            f = open(f'temp_{chat_id}_out.txt', 'w')
-            f.write(stdout_str)
-            f.close()
-            bot.send_document(chat_id, open(f'temp_{chat_id}_out.txt', 'rb'))
-            os.remove(f'temp_{chat_id}_out.txt')
+            output = stdout_str.strip()
+            if output != '':
+                f = open(f'temp_{chat_id}_out.txt', 'w')
+                f.write(stdout_str)
+                f.close()
+                bot.send_document(chat_id, open(f'temp_{chat_id}_out.txt', 'rb'))
+                os.remove(f'temp_{chat_id}_out.txt')
             
-            stderr_str = stderr.decode('utf-8')
+            stderr_str = stderr.decode('utf-8').strip()
             if(stderr_str != ''):
                 f = open(f'temp_{chat_id}_err.txt', 'w')
                 f.write(stderr_str)
@@ -844,10 +845,7 @@ def instagram_handler(message):
                 "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
             ]
             
-            out = process_handler(['python', python_file] + arguments, True, 'instagram', call.message.chat.id)
-            if(not out[0]):
-                bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
-                return
+            process_handler(['python', python_file] + arguments, False, 'instagram', call.message.chat.id)
             
         @bot.callback_query_handler(func=lambda call: call.data == 'download_reel')
         def download_reel(call):
@@ -886,10 +884,7 @@ def instagram_handler(message):
                         "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
                     ]
                     
-                    out = process_handler(['python', python_file] + arguments, True, 'instagram', call.message.chat.id)
-                    if(not out[0]):
-                        bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
-                        return
+                    process_handler(['python', python_file] + arguments, False, 'instagram', call.message.chat.id)
             
             @bot.callback_query_handler(func=lambda call: call.data == 'user')
             def user_reel(call):
@@ -915,10 +910,8 @@ def instagram_handler(message):
                         "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
                     ]
                     
-                    out = process_handler(['python', python_file] + arguments, True, 'instagram', call.message.chat.id)
-                    if(not out[0]):
-                        bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
-                        return
+                    process_handler(['python', python_file] + arguments, False, 'instagram', call.message.chat.id)
+
                     
         @bot.callback_query_handler(func=lambda call: call.data == 'follow')
         def follow(call):
