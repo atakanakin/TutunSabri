@@ -1008,7 +1008,7 @@ def instagram_handler(message):
                     
             yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
             # edit the yaml file
-            configure_yaml_file(yaml_file, f'unfollow-any: [20-30]')
+            configure_yaml_file(yaml_file, f'unfollow-any: 20-30')
             
             # run the bot
             arguments = [
