@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import yaml
+import socket
 import random
 import psutil
 import signal
@@ -1051,6 +1052,13 @@ def instagram_handler(message):
                 if(not out[0]):
                     bot.send_message(message.chat.id, f'Bir sorun oluştu: {out[1]}')
                     return
+                
+## hostname -- eduroam uses dynamic ip, after rebooting the pi, the ip may change
+@bot.message_handler(commands=['hostname'])
+def hostname_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    bot.send_message(message.chat.id, f'Hostname: {socket.gethostbyname(socket.gethostname())}')
     
 ## exit
 @bot.message_handler(commands=['exit'])
