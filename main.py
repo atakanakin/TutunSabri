@@ -169,6 +169,10 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
                 os.remove(f'temp_{chat_id}_err.txt')
             # remove the process from the active process list
             active_process[chat_id][process_name].remove(process)
+            if len(active_process[chat_id][process_name]) == 0:
+                del active_process[chat_id][process_name]
+            if len(active_process[chat_id]) == 0:
+                del active_process[chat_id]
             
         
         
