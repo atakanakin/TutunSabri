@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import yaml
 import random
 import psutil
 import signal
@@ -115,10 +116,14 @@ def file_handler(message, output:str, type: str):
     os.remove(output)
     
 ## create and run a process
-def process_handler(executable: list, wait_to_finish: bool, process_name: str, chat_id):
+def process_handler(executable: list, wait_to_finish: bool, process_name: str, chat_id, cwd=None):
+    global bot
+    
     process = CustomPopen(executable,
+                          cwd=cwd,
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                stderr=subprocess.PIPE
+                                )
         
     if(wait_to_finish):
         # wait for the process to complete
@@ -141,6 +146,29 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
             active_process[chat_id][process_name].append(process)
         else:
             active_process[chat_id][process_name] = [process]
+            
+        if process_name == 'gramaddict':
+            stdout, stderr = process.communicate()
+            # check return code
+            if process.returncode != 0:
+                bot.send_message(chat_id, f'Bir hata oluştu: {process.returncode}')
+            stdout_str = stdout.decode('utf-8')
+            output = stdout_str.strip().split('\n')
+            f = open(f'temp_{chat_id}_out.txt', 'w')
+            f.write(stdout_str)
+            f.close()
+            bot.send_document(chat_id, open(f'temp_{chat_id}_out.txt', 'rb'))
+            os.remove(f'temp_{chat_id}_out.txt')
+            
+            stderr_str = stderr.decode('utf-8')
+            if(stderr_str != ''):
+                f = open(f'temp_{chat_id}_err.txt', 'w')
+                f.write(stderr_str)
+                f.close()
+                bot.send_document(chat_id, open(f'temp_{chat_id}_err.txt', 'rb'))
+                os.remove(f'temp_{chat_id}_err.txt')
+            # remove the process from the active process list
+            active_process[chat_id][process_name].remove(process)
             
         
         
@@ -194,6 +222,48 @@ def access_control(chat_id, admin: bool = False):
             bot.delete_message(call.message.chat.id, call.message.message_id)
         return False
     
+def gramaddict_yaml_file(chat_id):
+    global usernames
+    # get the directory for the gramaddict folder
+    #  python -m site --user-site
+    site = subprocess.run(['python', '-m', 'site', '--user-site'], stdout=subprocess.PIPE)
+    # ensure the process is completed
+    site.check_returncode()
+    # get the site path
+    site_path = site.stdout.decode('utf-8').strip('\n')
+    # get the gramaddict folder
+    gramaddict_folder = os.path.join(site_path, 'GramAddict')
+    # get the username
+    username = usernames[str(chat_id)]
+    yaml_file = os.path.join(gramaddict_folder, 'accounts', username, 'config.yml')
+    return yaml_file, site_path
+
+def configure_yaml_file(config_file, to_add):
+    with open(config_file) as f:
+        config = yaml.safe_load(f)
+
+    if 'blogger-followers' in config:
+        del config['blogger-followers']
+
+    if 'blogger-post-likers' in config:
+        del config['blogger-post-likers']
+
+    if 'hashtag-likers-top' in config:
+        del config['hashtag-likers-top']
+
+    if 'unfollow-any' in config:
+        del config['unfollow-any']
+
+    if 'working-hours' in config:
+        del config['working-hours']
+
+    f = open(config_file, 'w')
+    f.write(yaml.dump(config, default_flow_style=False))
+    f.write('working-hours: [00.00-23.59]\n')
+    f.write(to_add)
+    f.close()
+    
+
 # command handlers
 
 ## start, help, info
@@ -747,7 +817,9 @@ def instagram_handler(message):
         options = types.InlineKeyboardMarkup(row_width=2)
         upload_reel_button = types.InlineKeyboardButton("Reel Yükle  \U0001F4F7", callback_data='upload_reel')
         download_reel_button = types.InlineKeyboardButton("Reel İndir  \U0001F4E5", callback_data='download_reel')
-        options.add(upload_reel_button, download_reel_button)
+        follow_button = types.InlineKeyboardButton("Takip Et  \U0001F4E5", callback_data='follow')
+        unfollow_button = types.InlineKeyboardButton("Takipten Çık  \U0001F4E5", callback_data='unfollow')
+        options.add(upload_reel_button, download_reel_button, follow_button, unfollow_button)
         bot.send_message(call.message.chat.id, f'{call.data} kullanıcısı ile işlem yapılacak.', reply_markup=options)
         usernames[str(call.message.chat.id)] = call.data
         
@@ -843,6 +915,112 @@ def instagram_handler(message):
                     if(not out[0]):
                         bot.send_message(call.message.chat.id, f'Bir sorun oluştu: {out[1]}')
                         return
+                    
+        @bot.callback_query_handler(func=lambda call: call.data == 'follow')
+        def follow(call):
+            # delete the message
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+            
+            follow_options = types.InlineKeyboardMarkup(row_width=2)
+            follow_hashtag_button = types.InlineKeyboardButton("Hashtag Gönderilerini Beğenenleri Takip Et  \U0001F4F7", callback_data='follow_hashtag_likers')
+            follow_user_followers_button = types.InlineKeyboardButton("Kullanıcı Takipçilerini Takip Et  \U0001F4E5", callback_data='follow_user_followers')
+            follow_user_likers_button = types.InlineKeyboardButton("Kullanıcı Gönderilerini Beğenenleri Takip Et  \U0001F4E5", callback_data='follow_user_likers')
+            follow_options.add(follow_hashtag_button, follow_user_followers_button, follow_user_likers_button)
+            bot.send_message(call.message.chat.id, "Takip seçeneklerinden birini seçiniz.", reply_markup=follow_options)
+            
+            @bot.callback_query_handler(func=lambda call: call.data == 'follow_hashtag_likers')
+            def follow_hashtag_likers(call):
+                # delete the message
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.send_message(call.message.chat.id, "Lütfen hashtag ismini yazınız.")
+                
+                hold = [True]
+                @bot.message_handler(func=lambda message: hold[0])
+                def get_hashtag(message):
+                    hashtag = message.text
+                    hold[0] = False
+                    bot.send_message(message.chat.id, f"İşlem başlatılıyor. {hashtag} hashtag'indeki gönderileri beğenen kullanıcılar takip edilecek.")
+                    
+                    yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
+                    # edit the yaml file
+                    configure_yaml_file(yaml_file, f'hashtag-likers-top: [{hashtag}]')
+                    
+                    # run the bot
+                    arguments = [
+                        'gramaddict', 'run',
+                        "--config", f'accounts/{usernames[str(message.chat.id)]}/config.yml',
+                    ]
+                    
+                    process_handler(arguments, False, 'gramaddict', message.chat.id, cwd=f'{site_path}/GramAddict')
+                    
+            @bot.callback_query_handler(func=lambda call: call.data == 'follow_user_followers')
+            def follow_user_followers(call):
+                # delete the message
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.send_message(call.message.chat.id, "Lütfen kullanıcı adını yazınız.")
+                
+                hold = [True]
+                @bot.message_handler(func=lambda message: hold[0])
+                def get_username(message):
+                    username = message.text
+                    hold[0] = False
+                    bot.send_message(message.chat.id, f"İşlem başlatılıyor. {username} kullanıcısının takipçileri takip edilecek.")
+                    
+                    yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
+                    # edit the yaml file
+                    configure_yaml_file(yaml_file, f'blogger-followers: [{username}]')
+                    
+                    # run the bot
+                    arguments = [
+                        'gramaddict', 'run',
+                        "--config", f'accounts/{usernames[str(message.chat.id)]}/config.yml',
+                    ]
+                    
+                    process_handler(arguments, False, 'gramaddict', message.chat.id, cwd=f'{site_path}/GramAddict')
+                    
+            @bot.callback_query_handler(func=lambda call: call.data == 'follow_user_likers')
+            def follow_user_likers(call):
+                # delete the message
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.send_message(call.message.chat.id, "Lütfen kullanıcı adını yazınız.")
+                
+                hold = [True]
+                @bot.message_handler(func=lambda message: hold[0])
+                def get_username(message):
+                    username = message.text
+                    hold[0] = False
+                    bot.send_message(message.chat.id, f"İşlem başlatılıyor. {username} kullanıcısının gönderilerini beğenenler takip edilecek.")
+                    
+                    yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
+                    # edit the yaml file
+                    configure_yaml_file(yaml_file, f'blogger-post-likers: [{username}]')
+                    
+                    # run the bot
+                    arguments = [
+                        'gramaddict', 'run',
+                        "--config", f'accounts/{usernames[str(message.chat.id)]}/config.yml',
+                    ]
+                    
+                    process_handler(arguments, False, 'gramaddict', message.chat.id, cwd=f'{site_path}/GramAddict')
+                    
+        @bot.callback_query_handler(func=lambda call: call.data == 'unfollow')
+        def unfollow(call):
+            # delete the message
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+            bot.send_message(message.chat.id, f"İşlem başlatılıyor. 20-30 kişi takipten çıkılacak.")
+                    
+            yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
+            # edit the yaml file
+            configure_yaml_file(yaml_file, f'unfollow-any: [20-30]')
+            
+            # run the bot
+            arguments = [
+                'gramaddict', 'run',
+                "--config", f'accounts/{usernames[str(message.chat.id)]}/config.yml',
+            ]
+            
+            process_handler(arguments, False, 'gramaddict', message.chat.id, cwd=f'{site_path}/GramAddict')
+            
             
     @bot.callback_query_handler(func=lambda call: call.data == 'add_account')
     def add_user(call):
