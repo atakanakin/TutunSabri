@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import yaml
-import socket
 import random
 import psutil
 import signal
@@ -1058,7 +1057,9 @@ def instagram_handler(message):
 def hostname_handler(message):
     if not access_control(message.chat.id, admin=True):
         return
-    bot.send_message(message.chat.id, f'Hostname: {socket.gethostbyname(socket.gethostname())}')
+    output = (os.popen('hostname -I').read()).strip().split(" ")
+    for out in output:
+        bot.send_message(message.chat.id, out)
     
 ## exit
 @bot.message_handler(commands=['exit'])

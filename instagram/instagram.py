@@ -236,9 +236,9 @@ elif mode == 'upload_reel':
             'width': '1920',
             'supports_streaming': True
         }
+        response = requests.post(url, data=data)
         f_video.close()
         f_caption.close()
-        response = requests.post(url, data=data)
         
         # check if the response is successful
         if response.status_code != 200:
