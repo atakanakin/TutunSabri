@@ -1008,7 +1008,7 @@ def instagram_handler(message):
                     
             yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
             # edit the yaml file
-            configure_yaml_file(yaml_file, f'unfollow-any: [20-30]')
+            configure_yaml_file(yaml_file, f'unfollow-any: 20-30')
             
             # run the bot
             arguments = [
@@ -1051,6 +1051,15 @@ def instagram_handler(message):
                 if(not out[0]):
                     bot.send_message(message.chat.id, f'Bir sorun oluştu: {out[1]}')
                     return
+                
+## hostname -- eduroam uses dynamic ip, after rebooting the pi, the ip may change
+@bot.message_handler(commands=['hostname'])
+def hostname_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    output = (os.popen('hostname -I').read()).strip().split(" ")
+    for out in output:
+        bot.send_message(message.chat.id, out)
     
 ## exit
 @bot.message_handler(commands=['exit'])
