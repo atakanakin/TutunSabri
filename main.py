@@ -6,6 +6,7 @@ import random
 import psutil
 import signal
 import telebot
+import datetime
 import subprocess
 from telebot import types
 from dropbox_helper import DropBoxUpload
@@ -14,10 +15,11 @@ from dropbox_helper import DropBoxUpload
 active_process = {}
 youtube_urls = {}
 usernames = {}
+main_pid = os.getpid()
 
 class CustomPopen(subprocess.Popen):
     def __str__(self) -> str:
-        return f'PID: {self.pid}, Command: {self.args}'
+        return f'PID: {self.pid}\n Command: {self.args}\n Time: {datetime.datetime.now().strftime("%H:%M:%S")}'
 
 # read the bot token from the json file
 with open('bot_config.json') as f:
@@ -492,6 +494,7 @@ def yht_handler(message):
 ## cancel the yht search
 @bot.message_handler(commands=['yhtcancel'])
 def yht_cancel_handler(message):
+    global owner_id
     if not access_control(message.chat.id):
         return
     global active_process
@@ -501,10 +504,13 @@ def yht_cancel_handler(message):
             try:
                kill_process_tree(process)
             except ProcessLookupError as e:
-                print('Look up error?')
-                print(e)
+                bot.send_message(message.chat.id, f'Process with pid {process.pid} not found.')
+                bot.send_message(owner_id, f'Process with pid {process.pid} not found. {e}\n\n {message.chat.id}: yht' )
+                return
             except Exception as e:
-                print(e)
+                bot.send_message(message.chat.id, f'Process with pid {process.pid} thrown an exception. Could not kill the process.')
+                bot.send_message(owner_id, f'Process with pid {process.pid} thrown an exception. Could not kill the process. {e}\n\n {message.chat.id}: yht')
+                return
             active_process[message.chat.id]['yht'].remove(process)
             if(len(active_process[message.chat.id]['yht']) == 0):
                 del active_process[message.chat.id]['yht']
@@ -563,7 +569,18 @@ def spor_handler(message):
         config = json.load(f)
         f.close()
         bot.send_message(message.chat.id, f'{config["username"]} kullanıcısı ile işlem yapılacak.')
-        spor_helper(message.chat.id)
+        bot.send_message(message.chat.id, "Lütfen seans saat bilgisini giriniz: (Örnek: 19:35 - 20:55)")
+        timeHold = [True]
+        @bot.message_handler(func=lambda message: timeHold[0])
+        def get_time(message):
+            desiredTime = message.text
+            timeHold[0] = False
+            bot.send_message(message.chat.id, "Program başlatılıyor...\nLütfen bekleyin.")
+            # call the reservation
+            python_file = os.path.join(os.getcwd(), 'spor', 'main.py')
+            arguments = [str(message.chat.id), token, desiredTime]
+            
+            process_handler(['python', python_file] + arguments, False, 'spor', message.chat.id)
     else:
         # ask for credentials
         bot.send_message(message.chat.id, "Rezervasyon yapmak için lütfen kullanıcı adınızı giriniz: (Örnek: e123456)")
@@ -583,11 +600,12 @@ def spor_handler(message):
                 }
                 with open(user_credential_path, 'w') as f:
                     json.dump(credentials, f)
-                spor_helper(message.chat.id)
+                bot.send_message(message.chat.id, "Kullanıcı bilgileriniz kaydedildi. Lütfen tekrar /spor komutunu kullanınız.")
 
 ## cancel the spor reservation
 @bot.message_handler(commands=['sporcancel'])
 def spor_cancel_handler(message):
+    global owner_id
     if not access_control(message.chat.id):
         return
     global active_process
@@ -597,10 +615,13 @@ def spor_cancel_handler(message):
             try:
                kill_process_tree(process)
             except ProcessLookupError as e:
-                print('Look up error?')
-                print(e)
+                bot.send_message(message.chat.id, f'Process with pid {process.pid} not found.')
+                bot.send_message(owner_id, f'Process with pid {process.pid} not found. {e}\n\n {message.chat.id}: spor')
+                return
             except Exception as e:
-                print(e)
+                bot.send_message(message.chat.id, f'Process with pid {process.pid} thrown an exception. Could not kill the process.')
+                bot.send_message(owner_id, f'Process with pid {process.pid} thrown an exception. Could not kill the process. {e}\n\n {message.chat.id}: spor')
+                return
             active_process[message.chat.id]['spor'].remove(process)
             if(len(active_process[message.chat.id]['spor']) == 0):
                 del active_process[message.chat.id]['spor']
@@ -1066,7 +1087,7 @@ def hostname_handler(message):
 def exit_handler(message):
     if not access_control(message.chat.id, admin=True):
         return
-    signal_handler(signal.SIGINT, None)
+    bot.send_message(message.chat.id, "Bu fonksiyon şu anda devre dışı bırakılmıştır.")
 
 # Start the bot
 bot.polling()

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Add a delay of 5 seconds because my little raspi tidin tidin -goes crazy- on startup
+sleep 5
+
 # Navigate to the project directory
 cd /home/atakan/Documents/Projects/TutunSabri/
 
