@@ -224,26 +224,25 @@ elif mode == 'upload_reel':
         # use sendVideo endpoint
         send_telegram_message('Reel yüklemek istediğinizden emin misiniz? Video size ulaştıktan sonra seçim yapmak için 20 saniyeniz var. Eğer yüklemek istemiyorsanız aşağıdaki komutu kullanabilirsiniz. Hiçbir şey yapmazsanız video yüklenecektir.')
         send_telegram_message(f'/kill {os.getpid()}')
+        
         url = f'https://api.telegram.org/bot{bot_token}/sendVideo'
-        f_video = open(video, 'rb')
-        f_caption = open(caption, 'r', encoding='utf-8')
-
-        data = {
-            'chat_id': user_id,
-            'video': f_video,
-            'caption': f_caption.read(),
-            'height': '1080',
-            'width': '1920',
-            'supports_streaming': True
-        }
-        response = requests.post(url, data=data)
-        f_video.close()
-        f_caption.close()
+        with open(video, 'rb') as f_video, open(caption, 'r', encoding='utf-8') as f_caption:
+            data = {
+                'chat_id': user_id,
+                'caption': f_caption.read(),
+                'height': '1080',
+                'width': '1920',
+                'supports_streaming': True
+            }
+            files = {
+                'video': f_video
+            }
+            response = requests.post(url, files=files, data=data)
         
         # check if the response is successful
         if response.status_code != 200:
             send_telegram_message('Video gönderilemedi. Video yüklenecek.')
-            
+            send_telegram_message('Response: {response.text}')
         else:
             time.sleep(20)
     
