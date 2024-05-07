@@ -18,12 +18,13 @@ active_process = {}
 youtube_urls = {}
 train_services = {}
 usernames = {}
-instagram_hashtag_user = {}
+instagram_command_flags = {}
 
 
 class CustomPopen(subprocess.Popen):
+    creation_time = None
     def __str__(self) -> str:
-        return f'PID: {self.pid}\n Command: {self.args}\n Time: {datetime.datetime.now().strftime("%H:%M:%S")}'
+        return f'PID: {self.pid}\n Command: {self.args}\n Time: {self.creation_time.strftime("%H:%M:%S")}'
 
 # read the bot token from the json file
 with open('bot_config.json') as f:
@@ -122,15 +123,22 @@ def file_handler(message, output:str, type: str):
     
 ## create and run a process
 def process_handler(executable: list, wait_to_finish: bool, process_name: str, chat_id, cwd=None):
-    global bot
+    global bot, active_process
     
     process = CustomPopen(executable,
                           cwd=cwd,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE
                                 )
-        
+    process.creation_time = datetime.datetime.now()
     if(wait_to_finish):
+        # add the process to the active process list
+        if chat_id not in active_process:
+            active_process[chat_id] = {}
+        if process_name in active_process[chat_id]:
+            active_process[chat_id][process_name].append(process)
+        else:
+            active_process[chat_id][process_name] = [process]
         # wait for the process to complete
         stdout, stderr = process.communicate()
         # get the exit code
@@ -141,9 +149,16 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
         # decode stdout
         stdout_str = stdout.decode('utf-8')
         output = stdout_str.strip().split('\n')
+        
+        # remove the process from the active process list
+        active_process[chat_id][process_name].remove(process)
+        if len(active_process[chat_id][process_name]) == 0:
+            del active_process[chat_id][process_name]
+        if len(active_process[chat_id]) == 0:
+            del active_process[chat_id]
+            
         return (True, output[-1].strip())
     else:
-        global active_process
         if chat_id not in active_process:
             active_process[chat_id] = {}
         # check if active process have key with chat id
@@ -271,8 +286,8 @@ def get_youtube_start_time(message):
         x = start_time.split(':')
         if len(x) != 2 or not x[0].isdigit() or not x[1].isdigit():
             bot.send_message(chat_id, "Hata: Lütfen başlangıç zamanını örnekteki gibi giriniz. Örnek: 01:15. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-            bot.register_next_step_handler_by_chat_id(chat_id, get_youtube_start_time)
             youtube_urls.pop(chat_id)
+            bot.register_next_step_handler_by_chat_id(chat_id, get_youtube_start_time)
             return
         youtube_urls[chat_id].start_time = start_time
         bot.send_message(chat_id, "Klip bitiş zamanını giriniz: (Örnek: 01:30) veya 'cancel' yazarak işlemi iptal edebilirsiniz.")
@@ -292,8 +307,8 @@ def get_youtube_end_time(message):
         x = end_time.split(':')
         if len(x) != 2 or not x[0].isdigit() or not x[1].isdigit():
             bot.send_message(chat_id, "Hata: Lütfen bitiş zamanını örnekteki gibi giriniz. Örnek: 02:57. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-            bot.register_next_step_handler_by_chat_id(chat_id, get_youtube_end_time)
             youtube_urls.pop(chat_id)
+            bot.register_next_step_handler_by_chat_id(chat_id, get_youtube_end_time)
             return
         youtube_urls[chat_id].end_time = end_time
         bot.send_message(chat_id, "Klip indiriliyor...\nLütfen bekleyin.")
@@ -422,9 +437,10 @@ def get_spor_time(message):
         if desired_time == 'cancel':
             bot.send_message(chat_id, "İşlem iptal edildi.")
             return
-        if desired_time.split(' - ') != 2:
+        if len(desired_time.split(' - ')) != 2:
             bot.send_message(chat_id, "Hata: Lütfen saat aralığını örnekteki gibi giriniz. Örnek: 19:35 - 20:55. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
             bot.register_next_step_handler_by_chat_id(chat_id, get_spor_time)
+            return
         bot.send_message(chat_id, "Program başlatılıyor...\nLütfen bekleyin.")
         bot.send_message(chat_id, 'Arama işlemini durdurmak istediğinde /sporcancel komutunu kullanabilirsin.')   
         # call the reservation
@@ -437,16 +453,58 @@ def get_spor_time(message):
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
         
 ## instagram
-def get_instagram_hashtag_user(message):
+def get_instagram_download_info(message):
+    global usernames, instagram_command_flags, token
     try:
-        global instagram_hashtag_user
         chat_id = message.chat.id
-        hashtag = message.text.strip()
-        if hashtag == 'cancel':
+        user_input = message.text.strip()
+        if user_input == 'cancel':
             bot.send_message(chat_id, "İşlem iptal edildi.")
             return
-        instagram_hashtag_user[chat_id] = hashtag
-        return
+        bot.send_message(chat_id, "Lütfen bekleyin.")
+        # call the instagram
+        mode = instagram_command_flags[str(chat_id)]
+        python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
+        arguments = [
+            "--mode", "download_reel",
+            "--download_mode", mode,
+            "--username", usernames[str(chat_id)],
+            "--chat_id", str(chat_id),
+            "--token", token,
+            "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
+        ]
+        if mode == 'user':
+            arguments += ["--download_user", user_input]
+        else:
+            arguments += ["--download_hashtag", user_input]
+        
+        process_handler(['python', python_file] + arguments, False, 'instagram', chat_id)
+        
+    except Exception as e:
+        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+        
+def get_instagram_follow_info(message):
+    global usernames, instagram_command_flags
+    try:
+        chat_id = message.chat.id
+        user_input = message.text.strip()
+        if user_input == 'cancel':
+            bot.send_message(chat_id, "İşlem iptal edildi.")
+            return
+        mode = instagram_command_flags[str(chat_id)]
+        bot.send_message(message.chat.id, f"İşlem başlatılıyor...")
+
+        yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
+        # edit the yaml file
+        configure_yaml_file(yaml_file, f'{mode}[{user_input}]')
+
+        # run the bot
+        arguments = [
+            'gramaddict', 'run',
+            "--config", f'accounts/{usernames[str(message.chat.id)]}/config.yml',
+        ]
+        
+        process_handler(arguments, False, 'gramaddict', message.chat.id, cwd=f'{site_path}/GramAddict')
         
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
@@ -473,11 +531,30 @@ def get_instagram_password(message):
         if password == 'cancel':
             bot.send_message(chat_id, "İşlem iptal edildi.")
             return
-        with open(f'{chat_id}_instagram_temp.json', 'r+') as f:
-            config = json.load(f)
-            config['password'] = password
-            f.seek(0)
-            f.write(json.dumps(config))
+            
+        with open(f'{chat_id}_instagram_temp.json', 'r') as f:
+            data = json.load(f)
+            username = data['username']
+            
+        os.remove(f'{chat_id}_instagram_temp.json')
+
+        instagram_path = os.path.join(os.getcwd(), 'credentials', 'instagram')
+        
+        bot.send_message(message.chat.id, f'{username} kullanıcısı ekleniyor.')
+        
+        python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
+        arguments = [
+            "--mode", "add_account",
+            "--username", username,
+            "--password", password,
+            "--chat_id", str(chat_id),
+            "--token", token,
+            "--directory", instagram_path,
+        ]
+        out = process_handler(['python', python_file] + arguments, True, 'instagram', message.chat.id)
+        if(not out[0]):
+            bot.send_message(chat_id, f'Bir sorun oluştu: {out[1]}')
+            return
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
 # command handlers
@@ -881,7 +958,7 @@ def listusers_handler(message):
         return
     global whitelist
     for user in whitelist:
-        bot.send_message(message.chat.id, f'[Kullanıcı](tg://user?id={user})', parse_mode='Markdown')
+        bot.send_message(message.chat.id, f'[{user}](tg://user?id={user})', parse_mode='Markdown')
         
 ## list active processes
 @bot.message_handler(commands=['process'])
@@ -950,7 +1027,7 @@ def selfie_handler(message):
 ## instagram - for now only for personal use
 @bot.message_handler(commands=['instagram'])
 def instagram_handler(message):
-    global usernames, token, instagram_hashtag_user
+    global usernames, token, instagram_command_flags
     if not access_control(message.chat.id, admin=True):
         return
     # credentials folder
@@ -1020,46 +1097,16 @@ def instagram_handler(message):
                 # delete the message
                 bot.delete_message(call.message.chat.id, call.message.message_id)
                 bot.send_message(call.message.chat.id, "Lütfen hashtag ismini yazınız. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_hashtag_user)
-    
-                bot.send_message(message.chat.id, "Lütfen bekleyin.")
-                # call the instagram
-                hashtag = instagram_hashtag_user[call.message.chat.id]
-                python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
-                arguments = [
-                    "--mode", "download_reel",
-                    "--download_mode", call.data,
-                    "--download_hashtag", hashtag,
-                    "--username", usernames[str(call.message.chat.id)],
-                    "--chat_id", str(call.message.chat.id),
-                    "--token", token,
-                    "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
-                ]
-                
-                process_handler(['python', python_file] + arguments, False, 'instagram', call.message.chat.id)
+                instagram_command_flags[str(call.message.chat.id)] = call.data
+                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_download_info)
             
             @bot.callback_query_handler(func=lambda call: call.data == 'user')
             def user_reel(call):
                 # delete the message
                 bot.delete_message(call.message.chat.id, call.message.message_id)
                 bot.send_message(call.message.chat.id, "Lütfen kullanıcı adını yazınız. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_hashtag_user)
-
-                username = instagram_hashtag_user[call.message.chat.id]
-                bot.send_message(message.chat.id, "Lütfen bekleyin.")
-                # call the instagram
-                python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
-                arguments = [
-                    "--mode", "download_reel",
-                    "--download_mode", call.data,
-                    "--download_user", username,
-                    "--username", usernames[str(call.message.chat.id)],
-                    "--chat_id", str(call.message.chat.id),
-                    "--token", token,
-                    "--directory", os.path.join(os.getcwd(), 'credentials', 'instagram'),
-                ]
-                
-                process_handler(['python', python_file] + arguments, False, 'instagram', call.message.chat.id)
+                instagram_command_flags[str(call.message.chat.id)] = call.data
+                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_download_info)
 
                     
         @bot.callback_query_handler(func=lambda call: call.data == 'follow')
@@ -1079,68 +1126,24 @@ def instagram_handler(message):
                 # delete the message
                 bot.delete_message(call.message.chat.id, call.message.message_id)
                 bot.send_message(call.message.chat.id, "Lütfen hashtag ismini yazınız. İşlemi iptal etmek için 'cancel' yazabilirsiniz")
-                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_hashtag_user)
-                
-                hashtag = instagram_hashtag_user[call.message.chat.id]
-                bot.send_message(message.chat.id, f"İşlem başlatılıyor. {hashtag} hashtag'indeki gönderileri beğenen kullanıcılar takip edilecek.")
-                
-                yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
-                # edit the yaml file
-                configure_yaml_file(yaml_file, f'hashtag-likers-top: [{hashtag}]')
-                
-                # run the bot
-                arguments = [
-                    'gramaddict', 'run',
-                    "--config", f'accounts/{usernames[str(message.chat.id)]}/config.yml',
-                ]
-                
-                process_handler(arguments, False, 'gramaddict', message.chat.id, cwd=f'{site_path}/GramAddict')
+                instagram_command_flags[str(call.message.chat.id)] = 'hashtag-likers-top: '
+                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_follow_info)
                     
             @bot.callback_query_handler(func=lambda call: call.data == 'follow_user_followers')
             def follow_user_followers(call):
                 # delete the message
                 bot.delete_message(call.message.chat.id, call.message.message_id)
                 bot.send_message(call.message.chat.id, "Lütfen kullanıcı adını yazınız. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_hashtag_user)
-                
-                username = instagram_hashtag_user[call.message.chat.id]
-
-                bot.send_message(message.chat.id, f"İşlem başlatılıyor. {username} kullanıcısının takipçileri takip edilecek.")
-                
-                yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
-                # edit the yaml file
-                configure_yaml_file(yaml_file, f'blogger-followers: [{username}]')
-                
-                # run the bot
-                arguments = [
-                    'gramaddict', 'run',
-                    "--config", f'accounts/{usernames[str(message.chat.id)]}/config.yml',
-                ]
-                
-                process_handler(arguments, False, 'gramaddict', message.chat.id, cwd=f'{site_path}/GramAddict')
+                instagram_command_flags[str(call.message.chat.id)] = 'blogger-followers: '
+                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_follow_info)
                     
             @bot.callback_query_handler(func=lambda call: call.data == 'follow_user_likers')
             def follow_user_likers(call):
                 # delete the message
                 bot.delete_message(call.message.chat.id, call.message.message_id)
                 bot.send_message(call.message.chat.id, "Lütfen kullanıcı adını yazınız. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_hashtag_user)
-                
-                username = instagram_hashtag_user[call.message.chat.id]
-
-                bot.send_message(message.chat.id, f"İşlem başlatılıyor. {username} kullanıcısının gönderilerini beğenenler takip edilecek.")
-                
-                yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
-                # edit the yaml file
-                configure_yaml_file(yaml_file, f'blogger-post-likers: [{username}]')
-                
-                # run the bot
-                arguments = [
-                    'gramaddict', 'run',
-                    "--config", f'accounts/{usernames[str(message.chat.id)]}/config.yml',
-                ]
-                
-                process_handler(arguments, False, 'gramaddict', message.chat.id, cwd=f'{site_path}/GramAddict')
+                instagram_command_flags[str(call.message.chat.id)] = 'blogger-post-likers: '
+                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_follow_info)
                     
         @bot.callback_query_handler(func=lambda call: call.data == 'unfollow')
         def unfollow(call):
@@ -1166,31 +1169,6 @@ def instagram_handler(message):
         bot.delete_message(call.message.chat.id, call.message.message_id)
         bot.send_message(call.message.chat.id, "Kullanıcı adınızı giriniz: (işlemi iptal etmek için 'cancel' yazabilirsiniz.)")
         bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_username)
-        
-        with open(f'{call.message.chat.id}_instagram_temp.json', 'r') as f:
-            data = json.load(f)
-            username = data['username']
-            password = data['password']
-            
-        os.remove(f'{call.message.chat.id}_instagram_temp.json')
-
-        instagram_path = os.path.join(os.getcwd(), 'credentials', 'instagram')
-        
-        bot.send_message(message.chat.id, f'{username} kullanıcısı ekleniyor.')
-        
-        python_file = os.path.join(os.getcwd(), 'instagram', 'instagram.py')
-        arguments = [
-            "--mode", "add_account",
-            "--username", username,
-            "--password", password,
-            "--chat_id", str(message.chat.id),
-            "--token", token,
-            "--directory", instagram_path,
-        ]
-        out = process_handler(['python', python_file] + arguments, True, 'instagram', message.chat.id)
-        if(not out[0]):
-            bot.send_message(message.chat.id, f'Bir sorun oluştu: {out[1]}')
-            return
                 
 ## hostname -- eduroam uses dynamic ip, after rebooting the pi, the ip may change
 @bot.message_handler(commands=['hostname'])
