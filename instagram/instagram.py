@@ -132,10 +132,10 @@ def download_reel(username: str, download_mode: str, download_hashtag: str, down
     if temp[0] == 'hashtag':
         if temp[1] == 'top':
             clips = cl.hashtag_medias_top(download_hashtag, amount=limitation*2)
-            temp_clips = [x.id for x in clips if x.media_type == 2 and x.product_type == 'clips']
         elif temp[1] == 'new':
             clips = cl.hashtag_medias_recent(download_hashtag, amount=limitation*2)
-            temp_clips = [x.id for x in clips if x.media_type == 2 and x.product_type == 'clips']
+            
+        temp_clips = [x.id for x in clips if x.media_type == 2 and x.product_type == 'clips']
     
     else:
         # download users reels
@@ -144,10 +144,12 @@ def download_reel(username: str, download_mode: str, download_hashtag: str, down
         temp_clips = [x.id for x in clips]
         
     download_directory = os.path.join(directory, 'content')
+    count = 0
     for x, clip in enumerate(temp_clips):
         try:
             cl.clip_download(clip, folder=download_directory)
-            if x != 0 and x % 2 == 0:
+            count += 1
+            if x != 0 and (x + 1) % 2 == 0:
                 send_telegram_message(f'{x+1} medya indirildi.')
         except Exception as e:
             cl.dump_settings(setting_file)
@@ -156,7 +158,7 @@ def download_reel(username: str, download_mode: str, download_hashtag: str, down
         if x >= limitation:
             break
     cl.dump_settings(setting_file)
-    send_telegram_message('İşlem başarılı. İndirilen medyalar "content" klasörüne kaydedildi.')
+    send_telegram_message(f'İşlem başarılı. {count} adet reels indirildi. İndirilen medyalar "content" klasörüne kaydedildi.')
     
 argparser = argparse.ArgumentParser()
 argparser.add_argument("--mode", help="Mode of the script", required=True, type=str, choices=["add_account", "upload_reel", "download_reel"])
@@ -222,16 +224,15 @@ elif mode == 'upload_reel':
     else:   
         # send video and caption to the user and ask for confirmation
         # use sendVideo endpoint
-        send_telegram_message('Reel yüklemek istediğinizden emin misiniz? Video size ulaştıktan sonra seçim yapmak için 20 saniyeniz var. Eğer yüklemek istemiyorsanız aşağıdaki komutu kullanabilirsiniz. Hiçbir şey yapmazsanız video yüklenecektir.')
-        send_telegram_message(f'/kill {os.getpid()}')
+        send_telegram_message('Video preview gönderiliyor...')
         
         url = f'https://api.telegram.org/bot{bot_token}/sendVideo'
         with open(video, 'rb') as f_video, open(caption, 'r', encoding='utf-8') as f_caption:
             data = {
                 'chat_id': user_id,
                 'caption': f_caption.read(),
-                'height': '1080',
-                'width': '1920',
+                'height': '1920',
+                'width': '1080',
                 'supports_streaming': True
             }
             files = {
@@ -242,8 +243,10 @@ elif mode == 'upload_reel':
         # check if the response is successful
         if response.status_code != 200:
             send_telegram_message('Video gönderilemedi. Video yüklenecek.')
-            send_telegram_message('Response: {response.text}')
+            send_telegram_message(f'Response: {response.text}')
         else:
+            send_telegram_message('Reel yüklemek istediğinizden emin misiniz? Seçim yapmak için 20 saniyeniz var. Eğer yüklemek istemiyorsanız aşağıdaki komutu kullanabilirsiniz. Hiçbir şey yapmazsanız video yüklenecektir.')
+            send_telegram_message(f'/kill {os.getpid()}')
             time.sleep(20)
     
     # TODO: Remove this if statement, this part only for my personal project
