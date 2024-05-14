@@ -23,6 +23,10 @@ instagram_command_flags = {}
 
 class CustomPopen(subprocess.Popen):
     creation_time = None
+    working_directory = None
+    wait_to_finish = None
+    def dump_those_args(self):
+        return self.args, self.creation_time
     def __str__(self) -> str:
         return f'PID: {self.pid}\n Command: {self.args}\n Time: {self.creation_time.strftime("%H:%M:%S")}'
 
@@ -33,12 +37,153 @@ with open('bot_config.json') as f:
     dropbox_token = data['dropbox_token']
     owner_id = data['owner_id']
     whitelist = data['white_list']
-    
+
 # create a dropbox upload object
 dbu = DropBoxUpload(dropbox_token)
 
 # create a bot object
 bot = telebot.TeleBot(token)
+
+## create and run a process
+def process_handler(executable: list, wait_to_finish: bool, process_name: str, chat_id, cwd=None):
+    global bot, active_process
+    
+    process = CustomPopen(executable,
+                          cwd=cwd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE
+                                )
+    process.creation_time = datetime.datetime.now()
+    process.working_directory = cwd
+    process.wait_to_finish = wait_to_finish
+    
+    if(wait_to_finish):
+        # add the process to the active process list
+        if chat_id not in active_process:
+            active_process[chat_id] = {}
+        if process_name in active_process[chat_id]:
+            active_process[chat_id][process_name].append(process)
+        else:
+            active_process[chat_id][process_name] = [process]
+        # wait for the process to complete
+        stdout, stderr = process.communicate()
+        # get the exit code
+        exit_code = process.returncode
+        if(exit_code != 0):
+            stderr_str = stderr.decode('utf-8')
+            return (False, stderr_str)
+        # decode stdout
+        stdout_str = stdout.decode('utf-8')
+        output = stdout_str.strip().split('\n')
+        
+        # remove the process from the active process list
+        active_process[chat_id][process_name].remove(process)
+        if len(active_process[chat_id][process_name]) == 0:
+            del active_process[chat_id][process_name]
+        if len(active_process[chat_id]) == 0:
+            del active_process[chat_id]
+            
+        return (True, output[-1].strip())
+    else:
+        if chat_id not in active_process:
+            active_process[chat_id] = {}
+        # check if active process have key with chat id
+        if chat_id in active_process and process_name in active_process[chat_id]:
+            active_process[chat_id][process_name].append(process)
+        else:
+            active_process[chat_id][process_name] = [process]
+            
+        if process_name in ['gramaddict', 'instagram']:
+            stdout, stderr = process.communicate()
+            # check return code
+            if process.returncode != 0:
+                bot.send_message(chat_id, f'Bir hata oluştu: {process.returncode}')
+            stdout_str = stdout.decode('utf-8')
+            output = stdout_str.strip()
+            if output != '':
+                f = open(f'temp_{chat_id}_out.txt', 'w')
+                f.write(stdout_str)
+                f.close()
+                bot.send_document(chat_id, open(f'temp_{chat_id}_out.txt', 'rb'))
+                os.remove(f'temp_{chat_id}_out.txt')
+            
+            stderr_str = stderr.decode('utf-8').strip()
+            if(stderr_str != ''):
+                f = open(f'temp_{chat_id}_err.txt', 'w')
+                f.write(stderr_str)
+                f.close()
+                bot.send_document(chat_id, open(f'temp_{chat_id}_err.txt', 'rb'))
+                os.remove(f'temp_{chat_id}_err.txt')
+            # remove the process from the active process list
+            active_process[chat_id][process_name].remove(process)
+            if len(active_process[chat_id][process_name]) == 0:
+                del active_process[chat_id][process_name]
+            if len(active_process[chat_id]) == 0:
+                del active_process[chat_id]
+                
+# dump active process to a file
+def dump_active_process():
+    global active_process
+    
+    process_hold = {'active_process': []}
+
+    if(len(active_process) > 0):
+        for key, value in active_process.items():
+            if(len(value) > 0):
+                for key2, value2 in value.items():
+                    for process in value2:
+                        try:
+                            user = key
+                            process_name = key2
+                            args, creation_time = process.dump_those_args()
+                            working_directory = process.working_directory
+                            wait_to_finish = process.wait_to_finish
+                            process_hold['active_process'].append({'user': user, 'process_name': process_name, 'args': args, 'working_directory': working_directory, 'wait_to_finish': wait_to_finish})
+                        except Exception as e:
+                            print(f'Could not write the active process to the file. {e}', flush=True)
+                   
+    with open('active_process.json', 'w', encoding='utf-8') as f:
+        json.dump(process_hold, f)
+    
+        
+def load_active_process():
+    with open('active_process.json', 'r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return
+        if 'active_process' in data:
+            for process in data['active_process']:
+                user = process['user']
+                process_name = process['process_name']
+                args = process['args']
+                working_directory = process['working_directory']
+                wait_to_finish = process['wait_to_finish']
+                try:
+                    # enhance this part by adding synchronization and also handling the return value
+                    # do not let func call block the main thread - run it in a separate thread
+                    # use a lock to synchronize the access to the active_process dictionary
+                    # use a condition variable to signal the main thread that the process is done
+                    # use a queue to store the return value
+                    # use a separate thread to handle the return value
+                    # TODO: Implement the above v2.0
+                    
+                    # for now, just run processes that do not wait for the process to finish and important ones
+                    if process_name in ['spor', 'yht']:
+                        bot.send_message(user, f'{process_name} işlemi kaldığı yerden devam ediyor...')
+                        process_handler(args, wait_to_finish, process_name, user, cwd=working_directory)
+                        
+                except Exception as e:
+                    bot.send_message(user, f'{process_name} işlemi kaldığı yerden devam ederken bir hata oluştu. {e}')
+    
+    # clear the file
+    with open('active_process.json', 'w', encoding='utf-8') as f:
+        f.write('')
+
+try:
+    load_active_process()
+except Exception as e:
+    print(f'Could not load the active process. {e}', flush=True)
     
 def signal_handler(sig, frame):
     # Inform the owner that the program is shutting down
@@ -46,6 +191,7 @@ def signal_handler(sig, frame):
     global bot
     global active_process
     bot.send_message(owner_id, "Program kapatılıyor.")
+    dump_active_process()
     # kill all active processes
     if(len(active_process) > 0):
         for key, value in active_process.items():
@@ -54,6 +200,8 @@ def signal_handler(sig, frame):
                     for process in value2:
                         try:
                             bot.send_message(key, f'{key2} işlemi kapatılıyor. Görüşürüz...')
+                            if key2 in ['spor', 'yht']:
+                                bot.send_message(key, f'Merak etme, [@atakan](tg://user?id={owner_id}) botu başlattığında __{key2}__ işlemini yeniden çalıştırmaya çalışcağım. Benden haber bekle...', parse_mode='Markdown')
                             kill_process_tree(process)
                         except Exception as e:
                             print(f'Process with pid {process.pid} thrown an exception. Could not kill the process. {e}', flush=True)
@@ -120,80 +268,6 @@ def file_handler(message, output:str, type: str):
                 bot.send_message(message.chat.id, f'Dropboxa yüklenirken bir hata oluştu.')
     file.close()
     os.remove(output)
-    
-## create and run a process
-def process_handler(executable: list, wait_to_finish: bool, process_name: str, chat_id, cwd=None):
-    global bot, active_process
-    
-    process = CustomPopen(executable,
-                          cwd=cwd,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE
-                                )
-    process.creation_time = datetime.datetime.now()
-    if(wait_to_finish):
-        # add the process to the active process list
-        if chat_id not in active_process:
-            active_process[chat_id] = {}
-        if process_name in active_process[chat_id]:
-            active_process[chat_id][process_name].append(process)
-        else:
-            active_process[chat_id][process_name] = [process]
-        # wait for the process to complete
-        stdout, stderr = process.communicate()
-        # get the exit code
-        exit_code = process.returncode
-        if(exit_code != 0):
-            stderr_str = stderr.decode('utf-8')
-            return (False, stderr_str)
-        # decode stdout
-        stdout_str = stdout.decode('utf-8')
-        output = stdout_str.strip().split('\n')
-        
-        # remove the process from the active process list
-        active_process[chat_id][process_name].remove(process)
-        if len(active_process[chat_id][process_name]) == 0:
-            del active_process[chat_id][process_name]
-        if len(active_process[chat_id]) == 0:
-            del active_process[chat_id]
-            
-        return (True, output[-1].strip())
-    else:
-        if chat_id not in active_process:
-            active_process[chat_id] = {}
-        # check if active process have key with chat id
-        if chat_id in active_process and process_name in active_process[chat_id]:
-            active_process[chat_id][process_name].append(process)
-        else:
-            active_process[chat_id][process_name] = [process]
-            
-        if process_name in ['gramaddict', 'instagram']:
-            stdout, stderr = process.communicate()
-            # check return code
-            if process.returncode != 0:
-                bot.send_message(chat_id, f'Bir hata oluştu: {process.returncode}')
-            stdout_str = stdout.decode('utf-8')
-            output = stdout_str.strip()
-            if output != '':
-                f = open(f'temp_{chat_id}_out.txt', 'w')
-                f.write(stdout_str)
-                f.close()
-                bot.send_document(chat_id, open(f'temp_{chat_id}_out.txt', 'rb'))
-                os.remove(f'temp_{chat_id}_out.txt')
-            
-            stderr_str = stderr.decode('utf-8').strip()
-            if(stderr_str != ''):
-                f = open(f'temp_{chat_id}_err.txt', 'w')
-                f.write(stderr_str)
-                f.close()
-                bot.send_document(chat_id, open(f'temp_{chat_id}_err.txt', 'rb'))
-                os.remove(f'temp_{chat_id}_err.txt')
-            # remove the process from the active process list
-            active_process[chat_id][process_name].remove(process)
-            if len(active_process[chat_id][process_name]) == 0:
-                del active_process[chat_id][process_name]
-            if len(active_process[chat_id]) == 0:
-                del active_process[chat_id]
             
 # check if the user is in the white list
 def access_control(chat_id, admin: bool = False):
@@ -659,7 +733,7 @@ def youtube_handler(message):
         bot.send_message(call.message.chat.id, "Ses indiriliyor...\nLütfen bekleyin.")
         # call the downloader
         executable_file = os.path.join(os.getcwd(), 'youtube', 'executable', 'youtube')
-        arguments = [youtube_url , os.getcwd(), 'audio']
+        arguments = [youtube_url.url , os.getcwd(), 'audio']
         
         out = process_handler([executable_file] + arguments, True, 'youtube', call.message.chat.id)
         
@@ -1001,7 +1075,7 @@ def kill_process_handler(message):
                     if(process.pid == pid):
                         kill_process_tree(process)
                         bot.send_message(key, f'{key2} işlemi kapatıldı.')
-                        bot.send_message(message.chat.id, f'Process with pid {pid} killed.')
+                        #bot.send_message(message.chat.id, f'Process with pid {pid} killed.')
                         return
     except Exception as e:
         bot.send_message(message.chat.id, f'Hata: {e}')
@@ -1184,7 +1258,29 @@ def hostname_handler(message):
 def exit_handler(message):
     if not access_control(message.chat.id, admin=True):
         return
-    bot.send_message(message.chat.id, "Bu fonksiyon şu anda devre dışı bırakılmıştır.")
+    # shutting down completely
+    bot.send_message(message.chat.id, "Raspberry kapatılıyor...")
+    # Inform the owner that the program is shutting down
+    global owner_id
+    global active_process
+    
+    bot.send_message(owner_id, "Aktif işlemler kapatılıyor.")
+    # kill all active processes
+    if(len(active_process) > 0):
+        for key, value in active_process.items():
+            if(len(value) > 0):
+                for key2, value2 in value.items():
+                    for process in value2:
+                        try:
+                            bot.send_message(key, f'[@atakan](tg://user?id={owner_id}) reboot attığı için {key2} işlemi kapatılıyor. Görüşürüz...', parse_mode='Markdown')
+                            if key2 in ['yht', 'spor']:
+                                bot.send_message(key, f'Merak etme raspberry tekrar açıldığında işlemi devam ettirmeye çalışacak. Sana haber vereceğim.')
+                            kill_process_tree(process)
+                        except Exception as e:
+                            print(f'Process with pid {process.pid} thrown an exception. Could not kill the process. {e}', flush=True)
+    dump_active_process()
+    # reboot
+    os.system('sudo reboot')
 
 # Start the bot
 bot.polling()

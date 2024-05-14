@@ -11,3 +11,6 @@ tmux new-session -d -s sabri
 
 # Execute wrapper script - this will start the bot - python wrapper.py
 tmux send-keys -t sabri "python wrapper.py" C-m
+# If above fails for some reason, reboot the pi
+# sudo reboot
+tmux send-keys -t sabri "sudo reboot" C-m
