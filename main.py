@@ -526,6 +526,30 @@ def get_spor_time(message):
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
         
+## broadcast
+def get_broadcast_message(message):
+    # get the media type and file id from the message
+    global whitelist
+    white_list_temp = whitelist.copy()
+    white_list_temp.append(owner_id)
+    if message.content_type == 'video':
+        file_id = message.video.file_id
+        for user in white_list_temp:
+            bot.send_video(int(user), file_id, caption=f'[@atakan](tg://user?id={owner_id}) bu videoyu herkesin izlemesi gerektiğini düşünüyor.', parse_mode='Markdown', supports_streaming=True)
+    elif message.content_type == 'photo':
+        file_id = None
+        size_temp = 0
+        for photo in message.photo:
+            if photo.file_size > size_temp:
+                file_id = photo.file_id
+                size_temp = photo.file_size
+        for user in white_list_temp:
+            bot.send_photo(int(user), file_id, caption=f'[@atakan](tg://user?id={owner_id}) bu fotoğrafı herkesin görmesi gerektiğini düşünüyor.', parse_mode='Markdown')
+    elif message.content_type == 'audio':
+        file_id = message.audio.file_id
+        for user in white_list_temp:
+            bot.send_audio(int(user), file_id, caption=f'[@atakan](tg://user?id={owner_id}) bu ses dosyasını herkesin dinlemesi gerektiğini düşünüyor.', parse_mode='Markdown')
+        
 ## instagram
 def get_instagram_download_info(message):
     global usernames, instagram_command_flags, token
@@ -1024,6 +1048,15 @@ def revoke_handler(message):
     # send a message to the user
     bot.send_message(int(user_id), "Yetkiniz alındı. Artık botu kullanamazsınız.")
     bot.send_message(message.chat.id, f'Kullanıcı yetkisi geri alındı: {user_id}')
+    
+## broadcast
+@bot.message_handler(commands=['broadcast'])
+def broadcast_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+
+    bot.send_message(message.chat.id, "Lütfen göndermek istediğiniz mesajı yazınız. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+    bot.register_next_step_handler_by_chat_id(message.chat.id, get_broadcast_message)
     
 ## list users
 @bot.message_handler(commands=['listusers'])
