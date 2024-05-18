@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Add a delay of 5 seconds because my little raspi tidin tidin -goes crazy- on startup
-sleep 5
+# Add a delay of 10 seconds because my little raspi tidin tidin -goes crazy- on startup
+sleep 10
 
 # Navigate to the project directory
 cd /home/atakan/Documents/Projects/TutunSabri/
@@ -10,7 +10,4 @@ cd /home/atakan/Documents/Projects/TutunSabri/
 tmux new-session -d -s sabri
 
 # Execute wrapper script - this will start the bot - python wrapper.py
-tmux send-keys -t sabri "python wrapper.py" C-m
-# If above fails for some reason, reboot the pi
-# sudo reboot
-tmux send-keys -t sabri "sudo reboot" C-m
+tmux send-keys -t sabri "python wrapper.py && sleep 5 && sudo reboot" C-m
