@@ -34,12 +34,14 @@ class CustomPopen(subprocess.Popen):
 with open('bot_config.json') as f:
     data = json.load(f)
     token = data['bot_token']
-    dropbox_token = data['dropbox_token']
     owner_id = data['owner_id']
     whitelist = data['white_list']
+    dropbox_app_key = data['dropbox_app_key']
+    dropbox_app_secret = data['dropbox_app_secret']
+    dropbox_oauth2_refresh_token = data['dropbox_oauth2_refresh_token']
 
 # create a dropbox upload object
-dbu = DropBoxUpload(dropbox_token)
+dbu = DropBoxUpload(dropbox_app_key, dropbox_app_secret, dropbox_oauth2_refresh_token)
 
 # create a bot object
 bot = telebot.TeleBot(token)
@@ -246,8 +248,8 @@ def file_handler(message, output:str, type: str):
         try:
             bot.send_audio(message.chat.id, audio = file)
         except Exception as e:
-            bot.send_message(message.chat.id, f'Ses dosyası gönderilemiyor.')
             bot.send_message(message.chat.id, f'Ses dosyasını dropboxa yüklüyorum...')
+            bot.send_message(message.chat.id, f'Video 1 gün sonra silinecektir.')
             try:
                 audUrl = dbu.UpLoadFile('',output)
                 bot.send_message(message.chat.id, text= f'<a href="{audUrl}">Ses dosyasını indir</a>', parse_mode='HTML')
@@ -259,8 +261,8 @@ def file_handler(message, output:str, type: str):
             file_id = bot.send_video(message.chat.id, video = file, supports_streaming=True, width=1920, height=1080)
             print(file_id.video.file_id) #TODO: Remove this line
         except Exception as e:
-            bot.send_message(message.chat.id, f'Video dosyası gönderilemiyor.')
             bot.send_message(message.chat.id, f'Videoyu dropboxa yüklüyorum...')
+            bot.send_message(message.chat.id, f'Video 1 gün sonra silinecektir.')
             try:
                 vidUrl = dbu.UpLoadFile('',output)
                 bot.send_message(message.chat.id, text= f'<a href="{vidUrl}">Videoyu indir</a>', parse_mode='HTML')
