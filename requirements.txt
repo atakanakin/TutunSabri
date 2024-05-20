@@ -22,3 +22,4 @@ picamera==1.13
 selenium==4.0.0a1
 edge-tts==6.1.10
 pillow==10.3.0
+bs4==0.0.2
