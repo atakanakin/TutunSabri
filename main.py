@@ -501,7 +501,7 @@ def get_spor_password(message):
             f.seek(0)
             f.write(json.dumps(config))
         bot.send_message(chat_id, "Kullanıcı bilgileriniz kaydedildi.")
-        bot.send_message(message.chat.id, "Lütfen seans saat bilgisini giriniz: (Örnek: 19:35 - 20:55). İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+        bot.send_message(message.chat.id, "Lütfen seans başlangıç saatini giriniz: (Örnek: 19:35). İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
         bot.register_next_step_handler_by_chat_id(message.chat.id, get_spor_time)
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
@@ -513,14 +513,10 @@ def get_spor_time(message):
         if desired_time == 'cancel':
             bot.send_message(chat_id, "İşlem iptal edildi.")
             return
-        if len(desired_time.split(' - ')) != 2:
-            bot.send_message(chat_id, "Hata: Lütfen saat aralığını örnekteki gibi giriniz. Örnek: 19:35 - 20:55. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-            bot.register_next_step_handler_by_chat_id(chat_id, get_spor_time)
-            return
         bot.send_message(chat_id, "Program başlatılıyor...\nLütfen bekleyin.")
         bot.send_message(chat_id, 'Arama işlemini durdurmak istediğinde /sporcancel komutunu kullanabilirsin.')   
         # call the reservation
-        python_file = os.path.join(os.getcwd(), 'spor', 'main.py')
+        python_file = os.path.join(os.getcwd(), 'spor', 'spor_v2.py')
         arguments = [str(chat_id), token, desired_time]
         
         process_handler(['python', python_file] + arguments, False, 'spor', chat_id)
@@ -904,7 +900,7 @@ def spor_handler(message):
         config = json.load(f)
         f.close()
         bot.send_message(message.chat.id, f'{config["username"]} kullanıcısı ile işlem yapılacak.')
-        bot.send_message(message.chat.id, "Lütfen seans saat bilgisini giriniz: (Örnek: 19:35 - 20:55). İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+        bot.send_message(message.chat.id, "Lütfen seans saat başlangıç saatini giriniz: (Örnek: 19:35). İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
         bot.register_next_step_handler_by_chat_id(message.chat.id, get_spor_time)
     else:
         # ask for credentials
@@ -953,14 +949,17 @@ def spor_cancel_handler(message):
 def mood_handler(message):
     if not access_control(message.chat.id):
         return
-    # get video file id's from file
-    with open(os.path.join(os.getcwd(), 'mood', 'mood.json'), 'r') as f:
-        mood = json.load(f)
-    video_ids = mood['video_ids']
-    # choose a random video,
-    video_id = random.choice(video_ids)
-    # send the video
-    bot.send_video(message.chat.id, video = video_id, supports_streaming=True, width=1920, height=1080)
+    try:
+        # get video file id's from file
+        with open(os.path.join(os.getcwd(), 'mood', 'mood.json'), 'r') as f:
+            mood = json.load(f)
+        video_ids = mood['video_ids']
+        # choose a random video,
+        video_id = random.choice(video_ids)
+        # send the video
+        bot.send_video(message.chat.id, video = video_id, supports_streaming=True, width=1920, height=1080)
+    except Exception as e:
+        bot.send_message(message.chat.id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
     
     
 ## pedro
