@@ -122,6 +122,14 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
                 del active_process[chat_id][process_name]
             if len(active_process[chat_id]) == 0:
                 del active_process[chat_id]
+            
+            # kill the adb server
+            if process_name == 'gramaddict':
+                try:
+                    os.system('adb kill-server')
+                except Exception as e:
+                    bot.send_message(chat_id, f'ADB sunucusu kapatılırken bir hata oluştu. {e}')
+                
                 
 # dump active process to a file
 def dump_active_process():
@@ -460,9 +468,9 @@ def get_yht_time(message):
             train_services.pop(chat_id)
             return
         train_services[chat_id].time = time
-        bot.send_message(chat_id, f'{train_services[chat_id].departure_station} - {train_services[chat_id].arrival_station} arası {train_services[chat_id].date} - {train_services[chat_id].time} tarihindeki tren seferleri için boş koltuk aranıyor...')
+        #bot.send_message(chat_id, f'{train_services[chat_id].departure_station} - {train_services[chat_id].arrival_station} arası {train_services[chat_id].date} - {train_services[chat_id].time} tarihindeki tren seferleri için boş koltuk aranıyor...')
         # call the train search
-        python_file = os.path.join(os.getcwd(), 'yht', 'yht_check.py')
+        python_file = os.path.join(os.getcwd(), 'yht', 'yht_v2.py')
         arguments = [token, str(chat_id), train_services[chat_id].departure_station, train_services[chat_id].arrival_station, train_services[chat_id].date, train_services[chat_id].time]
         
         bot.send_message(chat_id, 'Arama işlemini durdurmak istediğinde /yhtcancel komutunu kullanabilirsin.')        
