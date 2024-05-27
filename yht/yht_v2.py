@@ -96,12 +96,15 @@ def check_yht():
         sendTelegramMessage(f'{user_departure} - {user_arrival} arası için {user_date} tarihinde tren bulunamadı.')
         sys.exit(1)
         
+    hour_check = False
+        
     for train in trains["seferSorgulamaSonucList"]:
         locale.setlocale(locale.LC_TIME, 'en_US.utf8')
         date_obj = datetime.datetime.strptime(train["binisTarih"], "%b %d, %Y %I:%M:%S %p")
         locale.setlocale(locale.LC_TIME, 'tr_TR.utf8')
         
         if date_obj.hour == user_hour[0] and date_obj.minute == user_hour[1]:
+            hour_check = True
             for i in train["vagonTipleriBosYerUcret"]:
                 if i["ubsKodu"] == 2:
                     if empty_economy != i["kalanSayi"]:
@@ -120,7 +123,10 @@ def check_yht():
                             temp_str = 'boş yer *bulunmamaktadır*.'        
                         sendTelegramMessage(f'{user_departure} - {user_arrival} arası {formatted_date_str} tarihli trende *Business* vagonunda {temp_str}')
                         empty_business = i["kalanSayi"]
-                    
+    
+    if not hour_check:
+        sendTelegramMessage(f'{user_departure} - {user_arrival} arası için {user_date} tarihinde {user_hour[0]}:{user_hour[1]} saatlerinde tren bulunamadı. Program kapatılıyor.')
+        sys.exit(1)
 
 while True:
     try:

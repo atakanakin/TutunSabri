@@ -4,9 +4,11 @@ import json
 import yaml
 import psutil
 import signal
+import locale
 import random
 import telebot
 import datetime
+import requests
 import subprocess
 from telebot import types
 from yht_helper import YHTHelper
@@ -355,6 +357,69 @@ def configure_yaml_file(config_file, to_add):
     f.write(to_add)
     f.close()
     
+def yht_hour_helper(departure :str, arrival: str, date:str):
+    url = "https://api-yebsp.tcddtasimacilik.gov.tr/sefer/seferSorgula"
+    
+    locale.setlocale(locale.LC_TIME, 'en_US.utf8')
+    user_date_obj = datetime.datetime.strptime(date, "%d.%m.%Y")
+    final_user_date = user_date_obj.strftime("%b %d, %Y 00:00:00 AM")
+
+    # Define the headers for the request
+    headers = {
+        "Host": "api-yebsp.tcddtasimacilik.gov.tr",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Authorization": "Basic ZGl0cmF2b3llYnNwOmRpdHJhMzQhdm8u",
+        "Content-Type": "application/json",
+        "Origin": "https://bilet.tcdd.gov.tr",
+        "Connection": "keep-alive",
+        "Referer": "https://bilet.tcdd.gov.tr/",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "cross-site",
+        "Priority": "u=1"
+    }
+
+    # Define the payload for the request
+    payload = {
+        "kanalKodu": 3,
+        "dil": 0,
+        "seferSorgulamaKriterWSDVO": {
+            "satisKanali": 3,
+            "binisIstasyonu": departure,
+            "binisIstasyonu_isHaritaGosterimi": False,
+            "inisIstasyonu": arrival,
+            "inisIstasyonu_isHaritaGosterimi": False,
+            "seyahatTuru": 1,
+            "gidisTarih": final_user_date,
+            "bolgeselGelsin": False,
+            "islemTipi": 0,
+            "yolcuSayisi": 1,
+            "aktarmalarGelsin": True,
+        }
+    }
+    
+    response = requests.post(url, headers=headers, data=json.dumps(payload))
+    
+    trains = response.json()
+    
+    try:
+        if trains["seferSorgulamaSonucList"] == None:
+            return []
+        
+        hours_list = []
+        
+        for train in trains["seferSorgulamaSonucList"]:
+            locale.setlocale(locale.LC_TIME, 'en_US.utf8')
+            date_obj = datetime.datetime.strptime(train["binisTarih"], "%b %d, %Y %I:%M:%S %p")
+            hours_list.append(date_obj.strftime("%H:%M"))
+        hours_list.sort()
+        return hours_list
+    except Exception as e:
+        return []
+
 # next step handlers
 
 ## youtube
@@ -452,31 +517,54 @@ def get_yht_date(message):
             bot.send_message(chat_id, "İşlem iptal edildi.")
             train_services.pop(chat_id)
             return
-        train_services[chat_id].date = date
-        bot.send_message(chat_id, "Saat bilgisini giriniz: (Örnek: 15:33). İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-        bot.register_next_step_handler_by_chat_id(chat_id, get_yht_time)
-    except Exception as e:
-        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
-        
-def get_yht_time(message):
-    global train_services
-    try:
-        chat_id = message.chat.id
-        time = message.text.strip()
-        if time == 'cancel':
-            bot.send_message(chat_id, "İşlem iptal edildi.")
-            train_services.pop(chat_id)
+        # check if date is past
+        user_date_obj = datetime.datetime.strptime(date, "%d.%m.%Y")
+        if user_date_obj < datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0):
+            bot.send_message(chat_id, "Hata: Lütfen geçerli bir tarih giriniz. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+            bot.register_next_step_handler_by_chat_id(chat_id, get_yht_date)
             return
-        train_services[chat_id].time = time
-        #bot.send_message(chat_id, f'{train_services[chat_id].departure_station} - {train_services[chat_id].arrival_station} arası {train_services[chat_id].date} - {train_services[chat_id].time} tarihindeki tren seferleri için boş koltuk aranıyor...')
-        # call the train search
-        python_file = os.path.join(os.getcwd(), 'yht', 'yht_v2.py')
-        arguments = [token, str(chat_id), train_services[chat_id].departure_station, train_services[chat_id].arrival_station, train_services[chat_id].date, train_services[chat_id].time]
+        train_services[chat_id].date = date
+        hour_list = yht_hour_helper(train_services[chat_id].departure_station, train_services[chat_id].arrival_station, train_services[chat_id].date)
+        if len(hour_list) == 0:
+            bot.send_message(chat_id, "Sefer bulunamadı. Lütfen başka bir tarih deneyin.")
+            return
         
-        bot.send_message(chat_id, 'Arama işlemini durdurmak istediğinde /yhtcancel komutunu kullanabilirsin.')        
-        process_handler(['python', python_file] + arguments, False, 'yht', message.chat.id)
+        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        for i in range(0, len(hour_list), 2):
+            button1 = types.InlineKeyboardButton(hour_list[i], callback_data=hour_list[i])
+            if i+1 < len(hour_list):
+                button2 = types.InlineKeyboardButton(hour_list[i+1], callback_data=hour_list[i+1])
+                keyboard.add(button1, button2)
+            else:
+                keyboard.add(button1)
+        cancel_button = types.InlineKeyboardButton("İptal", callback_data='cancel')
+        keyboard.add(cancel_button)
+        
+        bot.send_message(chat_id, "Aşağıdaki saatlerden birini seçiniz:", reply_markup=keyboard)
+        
+        bot.register_callback_query_handler(callback_yht_hour, lambda call: call.message.chat.id == chat_id)
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+        
+def callback_yht_hour(call):
+    global train_services
+    chat_id = call.message.chat.id
+    if call.data == 'cancel':
+        bot.send_message(chat_id, "İşlem iptal edildi.")
+        train_services.pop(chat_id)
+        # remove the inline keyboard
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        return
+    train_services[chat_id].hour = call.data
+    # remove the inline keyboard
+    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+    bot.send_message(chat_id, "İşlem başlatılıyor...\nLütfen bekleyin.")
+    bot.send_message(chat_id, 'Arama işlemini durdurmak istediğinde /yhtcancel komutunu kullanabilirsin.')
+    # call the reservation
+    python_file = os.path.join(os.getcwd(), 'yht', 'yht_v2.py')
+    arguments = [token, str(chat_id), train_services[chat_id].departure_station, train_services[chat_id].arrival_station, train_services[chat_id].date, train_services[chat_id].hour]
+    
+    process_handler(['python', python_file] + arguments, False, 'yht', chat_id)
         
 ## spor
 def get_spor_username(message):
@@ -555,6 +643,20 @@ def get_broadcast_message(message):
         file_id = message.audio.file_id
         for user in white_list_temp:
             bot.send_audio(int(user), file_id, caption=f'[@atakan](tg://user?id={owner_id}) bu ses dosyasını herkesin dinlemesi gerektiğini düşünüyor.', parse_mode='Markdown')
+    
+    elif message.content_type == 'document':
+        file_id = message.document.file_id
+        for user in white_list_temp:
+            bot.send_document(int(user), file_id, caption=f'[@atakan](tg://user?id={owner_id}) bu dosyayı herkesin görmesi gerektiğini düşünüyor.', parse_mode='Markdown')
+            
+    elif message.content_type == 'text':
+        message_text = message.text
+        if message_text == 'cancel':
+            return
+        elif message_text == "":
+            return
+        for user in white_list_temp:
+            bot.send_message(int(user), message_text, parse_mode='html')
         
 ## instagram
 def get_instagram_download_info(message):
