@@ -124,6 +124,9 @@ def download_reel(username: str, download_mode: str, download_hashtag: str, down
     setting_file = os.path.join(directory, 'settings.json')
 
     cl = usual_login(setting_file, username, password)
+    
+    if download_mode == 'link':
+        pass
 
     temp = download_mode.split('_')
     
@@ -162,9 +165,10 @@ def download_reel(username: str, download_mode: str, download_hashtag: str, down
     
 argparser = argparse.ArgumentParser()
 argparser.add_argument("--mode", help="Mode of the script", required=True, type=str, choices=["add_account", "upload_reel", "download_reel"])
-argparser.add_argument("--download_mode", help="Download mode", required=False, type=str, choices=["hashtag_top", "hastag_new", "user"])
+argparser.add_argument("--download_mode", help="Download mode", required=False, type=str, choices=["hashtag_top", "hastag_new", "user", "link"])
 argparser.add_argument("--download_hashtag", help="Hashtag to download reels", required=False, type=str)
 argparser.add_argument("--download_user", help="Username to download reels", required=False, type=str)
+argparser.add_argument("--download_link", help="Link of the reel", required=False, type=str)
 argparser.add_argument("--username", help="Instagram username", required=True, type=str)
 argparser.add_argument("--password", help="Instagram password", required=False, type=str)
 argparser.add_argument("--chat_id", help="Telegram user id", required=True, type=str)

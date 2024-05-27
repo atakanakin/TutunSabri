@@ -20,8 +20,7 @@ timeout = 30
 browser = None
 
 def sendTelegramMessage(message):
-    # bot = Bot(token = botToken)
-    # bot.send_message(chat_id=chatId, text=message)
+    global botToken, chatId
     url = f"https://api.telegram.org/bot{botToken}/sendMessage?chat_id={chatId}&text={message}"
     res = requests.get(url).json()  # this sends the message
     if res.status_code != 200:
