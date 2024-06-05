@@ -126,7 +126,32 @@ def download_reel(username: str, download_mode: str, download_hashtag: str, down
     cl = usual_login(setting_file, username, password)
     
     if download_mode == 'link':
-        pass
+        media_pk = cl.media_pk_from_url(download_hashtag)
+        media_id = cl.media_id(media_pk)
+        downlaoded_clip = cl.clip_download(media_id, folder=os.path.join(directory, 'content'))
+        
+        # send clip to the user
+        url = f'https://api.telegram.org/bot{bot_token}/sendVideo'
+        with open(os.path.join(directory, 'content', f'{downlaoded_clip}'), 'rb') as f_video:
+            data = {
+                'chat_id': user_id,
+                'height': '1920',
+                'width': '1080',
+                'supports_streaming': True
+            }
+            files = {
+                'video': f_video
+            }
+            response = requests.post(url, files=files, data=data)
+            
+        if response.status_code != 200:
+            send_telegram_message('Video gönderilemedi.')
+            
+        # remove the video
+        os.remove(os.path.join(directory, 'content', f'{downlaoded_clip}'))
+        
+        cl.dump_settings(setting_file)
+        return
 
     temp = download_mode.split('_')
     

@@ -509,7 +509,7 @@ def get_yht_arrival_station(message):
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
 
 def get_yht_date(message):
-    global train_services
+    global train_services, bot
     try:
         chat_id = message.chat.id
         date = message.text.strip()
@@ -542,22 +542,26 @@ def get_yht_date(message):
         
         bot.send_message(chat_id, "Aşağıdaki saatlerden birini seçiniz:", reply_markup=keyboard)
         
-        bot.register_callback_query_handler(callback_yht_hour, lambda call: call.message.chat.id == chat_id)
+        @bot.callback_query_handler(func=lambda call: True)
+        def handle_hour_selection(call):
+            callback_yht_hour(call)
+            return
+        return
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
         
 def callback_yht_hour(call):
-    global train_services
+    global train_services, bot
     chat_id = call.message.chat.id
     if call.data == 'cancel':
         bot.send_message(chat_id, "İşlem iptal edildi.")
         train_services.pop(chat_id)
         # remove the inline keyboard
-        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        bot.delete_message(chat_id, call.message.message_id)
         return
     train_services[chat_id].hour = call.data
-    # remove the inline keyboard
-    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+    # delete message
+    bot.delete_message(chat_id, call.message.message_id)
     bot.send_message(chat_id, "İşlem başlatılıyor...\nLütfen bekleyin.")
     bot.send_message(chat_id, 'Arama işlemini durdurmak istediğinde /yhtcancel komutunu kullanabilirsin.')
     # call the reservation
@@ -565,6 +569,7 @@ def callback_yht_hour(call):
     arguments = [token, str(chat_id), train_services[chat_id].departure_station, train_services[chat_id].arrival_station, train_services[chat_id].date, train_services[chat_id].hour]
     
     process_handler(['python', python_file] + arguments, False, 'yht', chat_id)
+    return
         
 ## spor
 def get_spor_username(message):
@@ -1301,13 +1306,14 @@ def instagram_handler(message):
         def download_reel(call):
             # delete the message
             bot.delete_message(call.message.chat.id, call.message.message_id)
-            bot.send_message(call.message.chat.id, "Lütfen bekleyin.")
+            #bot.send_message(call.message.chat.id, "Lütfen bekleyin.")
             
             download_options = types.InlineKeyboardMarkup(row_width=2)
             hashtag_top_button = types.InlineKeyboardButton("Hashtag's Top Reels  \U0001F4F7", callback_data='hashtag_top')
             hashtag_recent_button = types.InlineKeyboardButton("Hashtag's Recent Reels  \U0001F4E5", callback_data='hashtag_new')
             user_button = types.InlineKeyboardButton("User's Reel  \U0001F4E5", callback_data='user')
-            download_options.add(hashtag_top_button, hashtag_recent_button, user_button)
+            link_button = types.InlineKeyboardButton("Link  \U0001F4E5", callback_data='link')
+            download_options.add(hashtag_top_button, hashtag_recent_button, user_button, link_button)
             bot.send_message(call.message.chat.id, "İndirme seçeneklerinden birini seçiniz.", reply_markup=download_options)
             
             @bot.callback_query_handler(func=lambda call: (call.data).split('_')[0] == 'hashtag')
@@ -1323,6 +1329,14 @@ def instagram_handler(message):
                 # delete the message
                 bot.delete_message(call.message.chat.id, call.message.message_id)
                 bot.send_message(call.message.chat.id, "Lütfen kullanıcı adını yazınız. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+                instagram_command_flags[str(call.message.chat.id)] = call.data
+                bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_download_info)
+            
+            @bot.callback_query_handler(func=lambda call: call.data == 'link')
+            def link_reel(call):
+                # delete the message
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.send_message(call.message.chat.id, "Lütfen linki yazınız. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
                 instagram_command_flags[str(call.message.chat.id)] = call.data
                 bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_download_info)
 
@@ -1367,11 +1381,11 @@ def instagram_handler(message):
         def unfollow(call):
             # delete the message
             bot.delete_message(call.message.chat.id, call.message.message_id)
-            bot.send_message(message.chat.id, f"İşlem başlatılıyor. 20-30 kişi takipten çıkılacak.")
+            bot.send_message(message.chat.id, f"İşlem başlatılıyor. 80-100 kişi takipten çıkılacak.")
                     
             yaml_file, site_path = gramaddict_yaml_file(message.chat.id)
             # edit the yaml file
-            configure_yaml_file(yaml_file, f'unfollow-any: 20-30')
+            configure_yaml_file(yaml_file, f'unfollow-any: 80-100')
             
             # run the bot
             arguments = [
