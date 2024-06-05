@@ -529,40 +529,37 @@ def get_yht_date(message):
             bot.send_message(chat_id, "Sefer bulunamadı. Lütfen başka bir tarih deneyin.")
             return
         
-        keyboard = types.InlineKeyboardMarkup(row_width=2)
+        keyboard = types.ReplyKeyboardMarkup(row_width=2)
         for i in range(0, len(hour_list), 2):
-            button1 = types.InlineKeyboardButton(hour_list[i], callback_data=hour_list[i])
+            button1 = types.KeyboardButton(hour_list[i])
             if i+1 < len(hour_list):
-                button2 = types.InlineKeyboardButton(hour_list[i+1], callback_data=hour_list[i+1])
+                button2 = types.KeyboardButton(hour_list[i+1])
                 keyboard.add(button1, button2)
             else:
                 keyboard.add(button1)
-        cancel_button = types.InlineKeyboardButton("İptal", callback_data='cancel')
+        cancel_button = types.KeyboardButton("cancel")
         keyboard.add(cancel_button)
         
         bot.send_message(chat_id, "Aşağıdaki saatlerden birini seçiniz:", reply_markup=keyboard)
-        
-        @bot.callback_query_handler(func=lambda call: True)
-        def handle_hour_selection(call):
-            callback_yht_hour(call)
-            return
+        bot.register_next_step_handler_by_chat_id(chat_id, callback_yht_hour)
         return
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
         
-def callback_yht_hour(call):
+def callback_yht_hour(message):
     global train_services, bot
-    chat_id = call.message.chat.id
-    if call.data == 'cancel':
-        bot.send_message(chat_id, "İşlem iptal edildi.")
+    chat_id = message.chat.id
+    
+    # remove the reply keyboard
+    reply_markup = types.ReplyKeyboardRemove()
+    
+    if message.text == 'cancel':
+        bot.send_message(chat_id, "İşlem iptal edildi.", reply_markup=reply_markup)
         train_services.pop(chat_id)
-        # remove the inline keyboard
-        bot.delete_message(chat_id, call.message.message_id)
         return
-    train_services[chat_id].hour = call.data
-    # delete message
-    bot.delete_message(chat_id, call.message.message_id)
-    bot.send_message(chat_id, "İşlem başlatılıyor...\nLütfen bekleyin.")
+    train_services[chat_id].hour = message.text
+    
+    bot.send_message(chat_id, "İşlem başlatılıyor...\nLütfen bekleyin.", reply_markup=reply_markup)
     bot.send_message(chat_id, 'Arama işlemini durdurmak istediğinde /yhtcancel komutunu kullanabilirsin.')
     # call the reservation
     python_file = os.path.join(os.getcwd(), 'yht', 'yht_v2.py')
