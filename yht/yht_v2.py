@@ -12,7 +12,9 @@ SPECIAL_CHARS = [
   '{',
   '}',
   '.',
-  '!'
+  '!',
+  '(',
+  ')'
 ]
 
 def replace_special_chars(text):
@@ -106,23 +108,24 @@ def check_yht():
         if date_obj.hour == user_hour[0] and date_obj.minute == user_hour[1]:
             hour_check = True
             for i in train["vagonTipleriBosYerUcret"]:
+                empty_seat_count = i["kalanSayi"]- i["kalanEngelliKoltukSayisi"]
                 if i["ubsKodu"] == 2:
-                    if empty_economy != i["kalanSayi"]:
+                    if empty_economy != empty_seat_count:
                         formatted_date_str = date_obj.strftime("%d %B %H:%M")
-                        temp_str = f'*{i["kalanSayi"]}* adet *boş* yer bulunmaktadır.'
-                        if i["kalanSayi"] == 0:
+                        temp_str = f'*{empty_seat_count}* adet *boş* yer bulunmaktadır.'
+                        if empty_seat_count == 0:
                             temp_str = 'boş yer *bulunmamaktadır*.'        
                         sendTelegramMessage(f'{user_departure} - {user_arrival} arası {formatted_date_str} tarihli trende *Ekonomi* vagonunda {temp_str}')
-                        empty_economy = i["kalanSayi"] 
+                        empty_economy = empty_seat_count
 
                 elif i["ubsKodu"] == 1:
-                    if empty_business != i["kalanSayi"]:
+                    if empty_business != empty_seat_count:
                         formatted_date_str = date_obj.strftime("%d %B %H:%M")
-                        temp_str = f'*{i["kalanSayi"]}* adet *boş* yer bulunmaktadır.'
-                        if i["kalanSayi"] == 0:
+                        temp_str = f'*{empty_seat_count}* adet *boş* yer bulunmaktadır.'
+                        if empty_seat_count == 0:
                             temp_str = 'boş yer *bulunmamaktadır*.'        
                         sendTelegramMessage(f'{user_departure} - {user_arrival} arası {formatted_date_str} tarihli trende *Business* vagonunda {temp_str}')
-                        empty_business = i["kalanSayi"]
+                        empty_business = empty_seat_count
     
     if not hour_check:
         sendTelegramMessage(f'{user_departure} - {user_arrival} arası için {user_date} tarihinde {user_hour[0]}:{user_hour[1]} saatlerinde tren bulunamadı. Program kapatılıyor.')

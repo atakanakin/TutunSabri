@@ -89,7 +89,7 @@ def main():
         'javax.faces.partial.render': 'form:facility',
         'javax.faces.behavior.event': 'valueChange',
         'javax.faces.partial.event': 'change',
-        'form:facility': '21', #change this to your facility id - 21 is: ODTÜKENT Spor Merkezi - Fitness Salonu
+        'form:facility_input': '21', #change this to your facility id - 21 is: ODTÜKENT Spor Merkezi - Fitness Salonu
         'form': 'form',
         'javax.faces.ViewState': viewstate
     }
@@ -118,7 +118,7 @@ def main():
             'form:myschedule': 'form:myschedule',
             'form:myschedule_start': start_time,
             'form:myschedule_end': end_time,
-            'form:facility': '21',
+            'form:facility_input': '21',
             'form:myschedule_view': 'agendaDay',
             'form': 'form',
             'javax.faces.ViewState': viewstate
@@ -166,7 +166,8 @@ def main():
                                 #print(f"{desiredTime} seansında {empty_slots} kişilik boş yer var.")
                                 sendTelegramMessage(f"{desiredTime} seansında {empty_slots} kişilik boş yer var.")
                             lastState = empty_slots
-                    if not flag:
+                    if lastState != 0 and not flag:
+                        lastState = 0
                         sendTelegramMessage(f"{desiredTime} seansında boş yer yok.")
                 except json.JSONDecodeError:
                     pass
