@@ -1,3 +1,8 @@
+"""
+This script is used to upload reels to Instagram and download reels from Instagram.
+The script uses the instagrapi library to interact with Instagram.
+The script sends a message to a telegram chat when the reel is uploaded or downloaded.
+"""
 import os
 import sys
 import time

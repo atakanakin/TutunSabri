@@ -1,3 +1,10 @@
+"""
+Used to check the availability of YHT tickets between two stations at a specific date and time.
+The script sends a message to a telegram chat if there is a change in the number of available seats.
+The script will keep running until it is stopped manually.
+Usage: python yht_v2.py <botToken> <chatId> <departure> <arrival> <date> <hour>
+Example: python yht_v2.py 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11 123456789 Ankara Istanbul 01.01.2022 12:00
+"""
 import sys
 import time
 import json
@@ -130,11 +137,19 @@ def check_yht():
     if not hour_check:
         sendTelegramMessage(f'{user_departure} - {user_arrival} arası için {user_date} tarihinde {user_hour[0]}:{user_hour[1]} saatlerinde tren bulunamadı. Program kapatılıyor.')
         sys.exit(1)
+        
+err_count = 0
 
 while True:
     try:
         check_yht()
         time.sleep(timeout)
+        if err_count > 0:
+            err_count -= 1
     except Exception as e:
-        sendTelegramMessage(f'Programda bir hata oluştu: {e}')
-        sys.exit(1)
+        # Due to the nature of the program, it is expected to have some errors.
+        # However, if the error count exceeds 5, the program will be terminated.
+        err_count += 1
+        if err_count >= 5:
+            sendTelegramMessage(f'Programda bir hata oluştu: {e}. İşlem kapatılıyor.')
+            sys.exit(1)

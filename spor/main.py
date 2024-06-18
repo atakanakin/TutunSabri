@@ -1,3 +1,10 @@
+"""
+This script is used to check the availability of a specific time slot in METU's sports facilities.
+The version is deprecated and not used in the project.
+Please use the latest version of the script in the same directory.
+The latest version uses requests library to check for the availability of the desired time slot.
+Thus, it is faster and more reliable than this version.
+"""
 import os
 import sys
 import json
