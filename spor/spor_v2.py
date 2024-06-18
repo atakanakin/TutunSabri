@@ -1,3 +1,10 @@
+"""
+This script is used to check the availability of the desired time slot in the METU Sports Center.
+The script sends a message to a telegram chat if there is a change in the number of available slots.
+The script will keep running until it is stopped manually.
+Usage: python spor_v2.py <chatId> <botToken> <desiredTime>
+Example: python spor_v2.py 123456789:ABC-DEF1234ghIkl-zyx57W2v1u123ew11 123456789 09:00
+"""
 import os
 import sys
 import time
@@ -185,8 +192,20 @@ def main():
         # print(f"Facility selection failed with status code {facility_response.status_code}")
         # print(facility_response.text)
 
-
+err_count = 0
 if __name__ == "__main__":
     while True:
-        main()
-        time.sleep(30)
+        try:
+            main()
+            time.sleep(30)
+            err_count = 0
+        except Exception as e:
+            # While parsing the response, sometimes the response is not in the expected format.
+            # In such cases, the script will wait for 5 seconds and try again.
+            # If the error count exceeds 10, the program will be terminated and user will be notified.
+            err_count += 1
+            if err_count > 10:
+                sendTelegramMessage(f"Programda bir hata oluştu. Program kapatılıyor. Hata: {str(e)}")
+                sys.exit(1)
+            time.sleep(5)
+            continue

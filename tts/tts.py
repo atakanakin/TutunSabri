@@ -1,3 +1,9 @@
+"""
+This script is used to convert text to speech using the Azure Text to Speech API.
+It detects the language of the text and selects a voice accordingly.
+Usage: python tts.py -p <path_to_text_file>
+Example: python tts.py -p /home/user/text.txt
+"""
 import edge_tts
 import random
 import os

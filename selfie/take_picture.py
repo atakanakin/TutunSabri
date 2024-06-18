@@ -1,3 +1,8 @@
+"""
+This script takes a picture using the Raspberry Pi camera and saves it to the img_path.
+Usage: python take_picture.py <img_path>
+Example: python take_picture.py /home/pi/Desktop/selfie.jpg
+"""
 import sys
 import picamera
 

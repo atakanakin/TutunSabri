@@ -1221,8 +1221,16 @@ def kill_process_handler(message):
                     if(process.pid == pid):
                         kill_process_tree(process)
                         bot.send_message(key, f'{key2} işlemi kapatıldı.')
-                        #bot.send_message(message.chat.id, f'Process with pid {pid} killed.')
-                        return
+                        # inform the admin with user tag and the process name key2
+                        bot.send_message(message.chat.id, f'[{key}](tg://user?id={key}) kullanıcısına ait {key2} işlemi sonlandırıldı', parse_mode='Markdown')
+                        # remove the process from the active_process
+                        value2.remove(process)
+                        if(len(value2) == 0):
+                            del active_process[key][key2]
+                        if(len(active_process[key]) == 0):
+                            del active_process[key]
+                        return  
+                    
     except Exception as e:
         bot.send_message(message.chat.id, f'Hata: {e}')
                 

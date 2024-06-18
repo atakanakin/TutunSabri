@@ -1,3 +1,9 @@
+"""
+This file is deprecated. It is not used in the project.
+Please use yht_v2.py file.
+While this version checks for YHT seats with the help of Selenium, yht_v2.py uses requests library to check for YHT seats.
+Thus, yht_v2.py is faster and more reliable than this version.
+"""
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
