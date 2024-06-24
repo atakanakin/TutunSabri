@@ -61,7 +61,7 @@ url = "https://api-yebsp.tcddtasimacilik.gov.tr/sefer/seferSorgula"
 # Define the headers for the request
 headers = {
     "Host": "api-yebsp.tcddtasimacilik.gov.tr",
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0",
     "Accept": "*/*",
     "Accept-Language": "en-US,en;q=0.5",
     "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -120,7 +120,7 @@ def check_yht():
                     if empty_economy != empty_seat_count:
                         formatted_date_str = date_obj.strftime("%d %B %H:%M")
                         temp_str = f'*{empty_seat_count}* adet *boş* yer bulunmaktadır.'
-                        if empty_seat_count == 0:
+                        if empty_seat_count <= 0:
                             temp_str = 'boş yer *bulunmamaktadır*.'        
                         sendTelegramMessage(f'{user_departure} - {user_arrival} arası {formatted_date_str} tarihli trende *Ekonomi* vagonunda {temp_str}')
                         empty_economy = empty_seat_count
@@ -129,7 +129,7 @@ def check_yht():
                     if empty_business != empty_seat_count:
                         formatted_date_str = date_obj.strftime("%d %B %H:%M")
                         temp_str = f'*{empty_seat_count}* adet *boş* yer bulunmaktadır.'
-                        if empty_seat_count == 0:
+                        if empty_seat_count <= 0:
                             temp_str = 'boş yer *bulunmamaktadır*.'        
                         sendTelegramMessage(f'{user_departure} - {user_arrival} arası {formatted_date_str} tarihli trende *Business* vagonunda {temp_str}')
                         empty_business = empty_seat_count
@@ -144,12 +144,14 @@ while True:
     try:
         check_yht()
         time.sleep(timeout)
-        if err_count > 0:
-            err_count -= 1
+        if timeout > 100:
+            timeout = 30
+        err_count  = 0
     except Exception as e:
         # Due to the nature of the program, it is expected to have some errors.
-        # However, if the error count exceeds 5, the program will be terminated.
+        # However, if the error count exceeds 10, the program will be terminated.
+        timeout *= 1.5
         err_count += 1
-        if err_count >= 5:
+        if err_count >= 10:
             sendTelegramMessage(f'Programda bir hata oluştu: {e}. İşlem kapatılıyor.')
             sys.exit(1)

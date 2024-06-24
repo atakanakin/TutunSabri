@@ -14,6 +14,8 @@ from telebot import types
 from yht_helper import YHTHelper
 from youtube_helper import YoutubeHelper
 from dropbox_helper import DropBoxUpload
+from yht.station_helper import get_all_stations
+from yht.station_helper import get_proper_station
 
 # global variables
 active_process = {}
@@ -41,6 +43,9 @@ with open('bot_config.json') as f:
     dropbox_app_key = data['dropbox_app_key']
     dropbox_app_secret = data['dropbox_app_secret']
     dropbox_oauth2_refresh_token = data['dropbox_oauth2_refresh_token']
+    
+# get the station names for the yht command
+get_all_stations()
 
 # create a dropbox upload object
 dbu = DropBoxUpload(dropbox_app_key, dropbox_app_secret, dropbox_oauth2_refresh_token)
@@ -487,46 +492,127 @@ def get_yht_departure_station(message):
         if departure_station == 'cancel':
             bot.send_message(chat_id, "İşlem iptal edildi.")
             return
-        train_services[chat_id] = YHTHelper(departure_station)
-        bot.send_message(chat_id, "Varış istasyonunu giriniz: (Örnek: Konya (Selçuklu YHT)). İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
-        bot.register_next_step_handler_by_chat_id(chat_id, get_yht_arrival_station)
+        departure_station.replace(' ', '')
+        stations = get_proper_station(departure_station)
+        if len(stations) == 0:
+            bot.send_message(chat_id, "Hata: Lütfen geçerli bir kalkış şehri giriniz. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+            bot.register_next_step_handler_by_chat_id(chat_id, get_yht_departure_station)
+            return
+
+        if len(stations) > 1:
+            keyboard = types.ReplyKeyboardMarkup(row_width=2)
+            for i in range(0, len(stations), 2):
+                button1 = types.KeyboardButton(stations[i])
+                if i+1 < len(stations):
+                    button2 = types.KeyboardButton(stations[i+1])
+                    keyboard.add(button1, button2)
+                else:
+                    keyboard.add(button1)
+            cancel_button = types.KeyboardButton("cancel")
+            keyboard.add(cancel_button)
+            
+            bot.send_message(chat_id, "Aşağıdaki istasyonlardan birini seçiniz:", reply_markup=keyboard)
+            bot.register_next_step_handler_by_chat_id(chat_id, get_yht_departure_station_choice)
+
+        else:
+            train_services[chat_id] = YHTHelper(stations[0])
+            bot.send_message(chat_id, "Varış şehrini giriniz. (Örnek: İstanbul veya istanbul). Lütfen sadece şehir ismini giriniz. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+            bot.register_next_step_handler_by_chat_id(chat_id, get_yht_arrival_station)
+            
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+        
+def get_yht_departure_station_choice(message):
+    global train_services
+    try:
+        # remove the reply keyboard
+        reply_markup = types.ReplyKeyboardRemove()
+        chat_id = message.chat.id
+        departure_station = message.text.strip()
+        if departure_station == 'cancel':
+            bot.send_message(chat_id, "İşlem iptal edildi.", reply_markup=reply_markup)
+            return
+        train_services[chat_id] = YHTHelper(departure_station)
+        bot.send_message(chat_id, "Varış şehrini giriniz. (Örnek: İstanbul veya istanbul). Lütfen sadece şehir ismini giriniz.. İşlemi iptal etmek için 'cancel' yazabilirsiniz.", reply_markup=reply_markup)
+        bot.register_next_step_handler_by_chat_id(chat_id, get_yht_arrival_station)
+    except Exception as e:
+        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}', reply_markup=reply_markup)
 
 def get_yht_arrival_station(message):
     global train_services
+    reply_markup = types.ReplyKeyboardRemove()
     try:
         chat_id = message.chat.id
         arrival_station = message.text.strip()
         if arrival_station == 'cancel':
-            bot.send_message(chat_id, "İşlem iptal edildi.")
+            bot.send_message(chat_id, "İşlem iptal edildi.", reply_markup=reply_markup)
             train_services.pop(chat_id)
             return
+        arrival_station.replace(' ', '')
+        stations = get_proper_station(arrival_station)
+        if len(stations) == 0:
+            bot.send_message(chat_id, "Hata: Lütfen geçerli bir varış şehri giriniz. İşlemi iptal etmek için 'cancel' yazabilirsiniz.", reply_markup=reply_markup)
+            bot.register_next_step_handler_by_chat_id(chat_id, get_yht_arrival_station)
+            return
+        
+        if len(stations) > 1:
+            keyboard = types.ReplyKeyboardMarkup(row_width=2)
+            for i in range(0, len(stations), 2):
+                button1 = types.KeyboardButton(stations[i])
+                if i+1 < len(stations):
+                    button2 = types.KeyboardButton(stations[i+1])
+                    keyboard.add(button1, button2)
+                else:
+                    keyboard.add(button1)
+            cancel_button = types.KeyboardButton("cancel")
+            keyboard.add(cancel_button)
+            
+            bot.send_message(chat_id, "Aşağıdaki istasyonlardan birini seçiniz:", reply_markup=keyboard)
+            bot.register_next_step_handler_by_chat_id(chat_id, get_yht_arrival_station_choice)
+            
+        else:
+            train_services[chat_id].arrival_station = stations[0]
+            bot.send_message(chat_id, "Tarih bilgisini giriniz: (Örnek: 13.04.2024). İşlemi iptal etmek için 'cancel' yazabilirsiniz.", reply_markup=reply_markup)
+            bot.register_next_step_handler_by_chat_id(chat_id, get_yht_date)
+    except Exception as e:
+        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}', reply_markup=reply_markup)
+        
+def get_yht_arrival_station_choice(message):
+    global train_services
+    try:
+        # remove the reply keyboard
+        reply_markup = types.ReplyKeyboardRemove()
+        chat_id = message.chat.id
+        arrival_station = message.text.strip()
+        if arrival_station == 'cancel':
+            bot.send_message(chat_id, "İşlem iptal edildi.", reply_markup=reply_markup)
+            return
         train_services[chat_id].arrival_station = arrival_station
-        bot.send_message(chat_id, "Tarih bilgisini giriniz: (Örnek: 13.04.2024). İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+        bot.send_message(chat_id, "Tarih bilgisini giriniz: (Örnek: 13.04.2024). İşlemi iptal etmek için 'cancel' yazabilirsiniz.", reply_markup=reply_markup)
         bot.register_next_step_handler_by_chat_id(chat_id, get_yht_date)
     except Exception as e:
-        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}', reply_markup=reply_markup)
 
 def get_yht_date(message):
     global train_services, bot
+    reply_markup = types.ReplyKeyboardRemove()
     try:
         chat_id = message.chat.id
         date = message.text.strip()
         if date == 'cancel':
-            bot.send_message(chat_id, "İşlem iptal edildi.")
+            bot.send_message(chat_id, "İşlem iptal edildi.", reply_markup=reply_markup)
             train_services.pop(chat_id)
             return
         # check if date is past
         user_date_obj = datetime.datetime.strptime(date, "%d.%m.%Y")
         if user_date_obj < datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0):
-            bot.send_message(chat_id, "Hata: Lütfen geçerli bir tarih giriniz. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+            bot.send_message(chat_id, "Hata: Lütfen geçerli bir tarih giriniz. İşlemi iptal etmek için 'cancel' yazabilirsiniz.", reply_markup=reply_markup)
             bot.register_next_step_handler_by_chat_id(chat_id, get_yht_date)
             return
         train_services[chat_id].date = date
         hour_list = yht_hour_helper(train_services[chat_id].departure_station, train_services[chat_id].arrival_station, train_services[chat_id].date)
         if len(hour_list) == 0:
-            bot.send_message(chat_id, "Sefer bulunamadı. Lütfen başka bir tarih deneyin.")
+            bot.send_message(chat_id, "Sefer bulunamadı. Lütfen başka bir tarih deneyin.", reply_markup=reply_markup)
             return
         
         keyboard = types.ReplyKeyboardMarkup(row_width=2)
@@ -544,7 +630,7 @@ def get_yht_date(message):
         bot.register_next_step_handler_by_chat_id(chat_id, callback_yht_hour)
         return
     except Exception as e:
-        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}', reply_markup=reply_markup)
         
 def callback_yht_hour(message):
     global train_services, bot
@@ -926,7 +1012,7 @@ def yht_handler(message):
     if message.text.strip() not in ['/yht', '/yht ']:
         bot.send_message(message.chat.id, "Hata: Lütfen komutu '/yht' şeklinde kullanınız. {message.text}")
         return
-    bot.send_message(message.chat.id, "Kalkış istasyonunu giriniz (Örnek: Ankara Gar). İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
+    bot.send_message(message.chat.id, "Kalkış şehrini giriniz. (Örnek: Ankara veya ankara). Lütfen sadece şehir ismini giriniz. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
     bot.register_next_step_handler_by_chat_id(message.chat.id, get_yht_departure_station)
 
 ## cancel the yht search
