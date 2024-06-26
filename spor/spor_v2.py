@@ -96,7 +96,7 @@ def main():
         'javax.faces.partial.render': 'form:facility',
         'javax.faces.behavior.event': 'valueChange',
         'javax.faces.partial.event': 'change',
-        'form:facility_input': '21', #change this to your facility id - 21 is: ODTÜKENT Spor Merkezi - Fitness Salonu
+        'form:facility_input': '17', #change this to your facility id - 21 is: ODTÜKENT Spor Merkezi - Fitness Salonu, 17 is Baraka Spor Salonu - Fitness Salonu
         'form': 'form',
         'javax.faces.ViewState': viewstate
     }
@@ -125,7 +125,7 @@ def main():
             'form:myschedule': 'form:myschedule',
             'form:myschedule_start': start_time,
             'form:myschedule_end': end_time,
-            'form:facility_input': '21',
+            'form:facility_input': '17', #change this to your facility id - 21 is: ODTÜKENT Spor Merkezi - Fitness Salonu, 17 is Baraka Spor Salonu - Fitness Salonu
             'form:myschedule_view': 'agendaDay',
             'form': 'form',
             'javax.faces.ViewState': viewstate
