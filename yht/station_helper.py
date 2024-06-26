@@ -2,6 +2,12 @@ import sys
 import json
 import requests
 
+def normalize_text(text: str):
+    temp_str = text.replace('I', 'ı')
+    text = temp_str.replace('İ', 'i')
+    
+    return text.lower()
+
 def get_all_stations():
     station_dict = {}
 
@@ -36,18 +42,18 @@ def get_all_stations():
         try:
             response_json = response.json()
             for i in response_json['istasyonBilgileriList']:
-                temp_view_name = i['stationViewName'].split(', ')[-1]
                 
-                if temp_view_name[0] == 'İ':
-                    temp_view_name = temp_view_name.replace('İ', 'i')
+                # check if it is High Speed Train station
+                if 'YHT' in i['stationTrainTypes']:
+                    temp_view_name = i['stationViewName'].split(', ')[-1]
                     
-                temp_view_name = temp_view_name.lower()
+                    temp_view_name = normalize_text(temp_view_name)
 
-                # Check if the station name is already in the dictionary
-                if temp_view_name in station_dict:
-                    station_dict[temp_view_name].append(i['istasyonAdi'])
-                else:
-                    station_dict[temp_view_name] = [i['istasyonAdi']]
+                    # Check if the station name is already in the dictionary
+                    if temp_view_name in station_dict:
+                        station_dict[temp_view_name].append(i['istasyonAdi'])
+                    else:
+                        station_dict[temp_view_name] = [i['istasyonAdi']]
                 
             # dump the dictionary to a json file
             with open('station_dict.json', 'w', encoding='utf-8') as f:
@@ -62,13 +68,8 @@ def get_all_stations():
 def get_proper_station(station_name):
     with open('station_dict.json', 'r', encoding='utf-8') as f:
         station_dict = json.load(f)
-        
-    if station_name[0] == 'İ':
-        station_name = station_name.replace('İ', 'i')
-        
     
-    
-    normalized_station_name = station_name.lower()
+    normalized_station_name = normalize_text(station_name)
     
     # Check if the station name is in the dictionary
     # also check when station_name is a substring of a key in the dictionary
