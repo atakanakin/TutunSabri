@@ -6,6 +6,12 @@ Future<String> downloadVideo(String url, String path, bool onlyAudio) async {
   var youtubeService = YoutubeExplode();
   Video video;
   try {
+    if (url.contains('list=')) {
+      throw Exception("Playlist URLs are not supported right now. If you want this feature, please open an issue on the GitHub repository or contact the developer.");
+    }
+    if (url.contains('/shorts/')){
+      url = url.split('?')[0];
+    }
     video = await youtubeService.videos.get(url);
   } catch (e) {
     throw Exception("Invalid URL or video not found.");
