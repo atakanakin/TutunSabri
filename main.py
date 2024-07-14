@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import json
 import yaml
 import psutil
@@ -59,6 +60,7 @@ def process_handler(executable: list, wait_to_finish: bool, process_name: str, c
     
     process = CustomPopen(executable,
                           cwd=cwd,
+                                stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE
                                 )
@@ -653,6 +655,44 @@ def callback_yht_hour(message):
     
     process_handler(['python', python_file] + arguments, False, 'yht', chat_id)
     return
+
+def yht_release_choice(message):
+    global bot, active_process
+    try:
+        # remove the reply keyboard
+        reply_markup = types.ReplyKeyboardRemove()
+        chat_id = message.chat.id
+        process_id = message.text.strip()
+        if process_id == 'cancel':
+            bot.send_message(chat_id, "İşlem iptal edildi.", reply_markup=reply_markup)
+            return
+        process_id = int(process_id)
+        if chat_id not in active_process or 'yht' not in active_process[chat_id]:
+            bot.send_message(chat_id, "Hata: Aktif bir işlem bulunamadı.", reply_markup=reply_markup)
+            return
+        
+        for process in active_process[chat_id]['yht']:
+            bot.send_message(chat_id, f'Koltuk salınıyor...', reply_markup=reply_markup)
+            if process_id == process.pid:
+                try:
+                    process.stdin.write(b'release\n')
+                    process.stdin.flush()
+                    process.communicate()
+                    time.sleep(10)
+                    bot.send_message(message.chat.id, "Hayır dualarınızı [buradan](https://buymeacoffee.com/atakanakin) kabul ediyorum.", parse_mode='Markdown')
+                except Exception as e:
+                    bot.send_message(chat_id, f'Bir hata oluştu: {e}', reply_markup=reply_markup)
+                # delete the process from the active process list
+                active_process[chat_id]['yht'].remove(process)
+                if len(active_process[chat_id]['yht']) == 0:
+                    del active_process[chat_id]['yht']
+                if len(active_process[chat_id]) == 0:
+                    del active_process[chat_id]
+                
+                return
+        
+    except Exception as e:
+        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}', reply_markup=reply_markup)
         
 ## spor
 def get_spor_username(message):
@@ -1014,6 +1054,57 @@ def yht_handler(message):
         return
     bot.send_message(message.chat.id, "Kalkış şehrini giriniz. (Örnek: Ankara veya ankara). Lütfen sadece şehir ismini giriniz. İşlemi iptal etmek için 'cancel' yazabilirsiniz.")
     bot.register_next_step_handler_by_chat_id(message.chat.id, get_yht_departure_station)
+
+@bot.message_handler(commands=['yhtrelease'])
+def yht_release_handler(message):
+    if not access_control(message.chat.id):
+        return
+    global active_process
+    if message.chat.id in active_process and 'yht' in active_process[message.chat.id]:
+        yht_process_list = active_process[message.chat.id]['yht']
+        if len(yht_process_list) > 1:
+            for process in yht_process_list:
+                args_list = process.args
+                bot.send_message(message.chat.id, f'{args_list[4]} - {args_list[5]} arası {args_list[6]} {args_list[7]} tarihli trendeki koltuğu bırakmak için <b>{process.pid}</b>', parse_mode='HTML')
+                
+            keyboard = types.ReplyKeyboardMarkup(row_width=2)
+            for i in range(0, len(yht_process_list), 2):
+                button1 = types.KeyboardButton(yht_process_list[i].pid)
+                if i+1 < len(yht_process_list):
+                    button2 = types.KeyboardButton(yht_process_list[i+1].pid)
+                    keyboard.add(button1, button2)
+                else:
+                    keyboard.add(button1)
+            cancel_button = types.KeyboardButton("cancel")
+            keyboard.add(cancel_button)
+                
+            bot.send_message(message.chat.id, "Birden fazla işlem bulundu. Hangi işlemi iptal etmek istediğinizi seçiniz.", reply_markup=keyboard)
+            bot.register_next_step_handler_by_chat_id(message.chat.id, yht_release_choice)
+            return
+
+
+        else:
+            reply_markup = types.ReplyKeyboardRemove()
+            bot.send_message(message.chat.id, "Koltuk salınıyor...", reply_markup=reply_markup)
+            try:
+                yht_process_list[0].stdin.write(b'release\n')
+                yht_process_list[0].stdin.flush()
+                yht_process_list[0].communicate()
+                time.sleep(10)
+                bot.send_message(message.chat.id, "Hayır dualarınızı [buradan](https://buymeacoffee.com/atakanakin) kabul ediyorum.", parse_mode='Markdown')
+            except Exception as e:
+                bot.send_message(message.chat.id, f'Process with pid {yht_process_list[0].pid} thrown an exception. Could not kill the process.')
+
+            # delete the process from the active process list
+            active_process[message.chat.id]['yht'].remove(yht_process_list[0])
+            if(len(active_process[message.chat.id]['yht']) == 0):
+                del active_process[message.chat.id]['yht']
+            if(len(active_process[message.chat.id]) == 0):
+                del active_process[message.chat.id]
+            return
+                
+    else:
+        bot.send_message(message.chat.id, "Aktif bir tren seferi arama işlemi bulunamadı.")
 
 ## cancel the yht search
 @bot.message_handler(commands=['yhtcancel'])
