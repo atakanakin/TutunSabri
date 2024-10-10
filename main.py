@@ -10,8 +10,11 @@ import random
 import telebot
 import datetime
 import requests
+import traceback
 import subprocess
 from telebot import types
+from langdetect import detect
+from langcodes import Language
 from yht_helper import YHTHelper
 from youtube_helper import YoutubeHelper
 from dropbox_helper import DropBoxUpload
@@ -24,6 +27,9 @@ youtube_urls = {}
 train_services = {}
 usernames = {}
 instagram_command_flags = {}
+
+# change them to your own paths
+VIDEO_FOLDER = os.path.join(os.getcwd(), 'credentials', 'instagram', 'tutun.sabri_raspi', 'content')
 
 
 class CustomPopen(subprocess.Popen):
@@ -289,7 +295,7 @@ def file_handler(message, output:str, type: str):
     os.remove(output)
             
 # check if the user is in the white list
-def access_control(chat_id, admin: bool = False):
+def access_control(chat_id, admin: bool = False, quiet: bool = False):
     global whitelist, bot, owner_id
     chat_id = str(chat_id)
     if chat_id == owner_id:
@@ -297,30 +303,32 @@ def access_control(chat_id, admin: bool = False):
     elif chat_id in whitelist and not admin:
         return True
     elif chat_id in whitelist and admin:
-        bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Bu işlemi sadece [@atakan](tg://user?id={owner_id}) yapabilir.', parse_mode='Markdown')
+        if not quiet:
+            bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Bu işlemi sadece [@atakan](tg://user?id={owner_id}) yapabilir.', parse_mode='Markdown')
         return False
     else:
-        # inline keyboard markup
-        keyboard = types.InlineKeyboardMarkup(row_width=2)
-        request_button = types.InlineKeyboardButton("Yetki İste  \U0001F6A7", callback_data='request')
-        cancel_button = types.InlineKeyboardButton("İptal  \U0000274C", callback_data='cancel')
-        keyboard.add(request_button, cancel_button)
-        bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Botu kullanabilmek için [@atakan](tg://user?id={owner_id}) kullanıcısından yetki isteyebilirsiniz.', parse_mode='Markdown', reply_markup=keyboard)
-        # handle the callback
-        @bot.callback_query_handler(func=lambda call: call.data == 'request')
-        def request(call):
-            bot.send_message(owner_id, f'[{call.message.chat.username}](tg://user?id={call.message.chat.id}) kullanıcısı yetki istiyor.', parse_mode='Markdown')
-            # log the request
-            request_file = os.path.join(os.getcwd(), 'requests', f'{call.message.chat.id}.txt')
-            f = open(request_file, 'w')
-            # log first name, last name, username, chat id, date
-            f.write(f'{call.message.chat.first_name} {call.message.chat.last_name}\n{call.message.chat.username}\n{call.message.chat.id}\n{call.message.date}')
-            f.close()            
-            bot.send_message(call.message.chat.id, "Yetki isteğiniz gönderildi. Lütfen bekleyin.")
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
-        def cancel(call):
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+        if not quiet:
+            # inline keyboard markup
+            keyboard = types.InlineKeyboardMarkup(row_width=2)
+            request_button = types.InlineKeyboardButton("Yetki İste  \U0001F6A7", callback_data='request')
+            cancel_button = types.InlineKeyboardButton("İptal  \U0000274C", callback_data='cancel')
+            keyboard.add(request_button, cancel_button)
+            bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Botu kullanabilmek için [@atakan](tg://user?id={owner_id}) kullanıcısından yetki isteyebilirsiniz.', parse_mode='Markdown', reply_markup=keyboard)
+            # handle the callback
+            @bot.callback_query_handler(func=lambda call: call.data == 'request')
+            def request(call):
+                bot.send_message(owner_id, f'[{call.message.chat.username}](tg://user?id={call.message.chat.id}) kullanıcısı yetki istiyor.', parse_mode='Markdown')
+                # log the request
+                request_file = os.path.join(os.getcwd(), 'requests', f'{call.message.chat.id}.txt')
+                f = open(request_file, 'w')
+                # log first name, last name, username, chat id, date
+                f.write(f'{call.message.chat.first_name} {call.message.chat.last_name}\n{call.message.chat.username}\n{call.message.chat.id}\n{call.message.date}')
+                f.close()            
+                bot.send_message(call.message.chat.id, "Yetki isteğiniz gönderildi. Lütfen bekleyin.")
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
+            def cancel(call):
+                bot.delete_message(call.message.chat.id, call.message.message_id)
         return False
     
 def gramaddict_yaml_file(chat_id):
@@ -891,6 +899,47 @@ def get_instagram_password(message):
             return
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+
+# tesseract ocr
+def get_tesseract_image(message):
+    try:
+        chat_id = message.chat.id
+        if message.content_type != 'photo':
+            bot.send_message(chat_id, "Hata: Lütfen bir fotoğraf gönderiniz. İşlem iptal edildi.")
+            return
+        file_id = message.photo[-1].file_id
+        file_info = bot.get_file(file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        with open(f'temp_content/{chat_id}_ocr_temp.jpg', 'wb') as new_file:
+            new_file.write(downloaded_file)
+        result_raw = subprocess.run(f'tesseract temp_content/{chat_id}_ocr_temp.jpg temp_content/{chat_id}_ocr_temp', shell=True, capture_output=True, text=True)
+        if result_raw.returncode != 0:
+            raise Exception(result_raw.stderr)
+        with open(f'temp_content/{chat_id}_ocr_temp.txt', 'r') as f:
+            temp_result = f.read()
+        # remove the temp file
+        os.remove(f'temp_content/{chat_id}_ocr_temp.txt')
+        detected_lang = detect(temp_result)  # Detect language
+        lang = Language.get(detected_lang).to_alpha3()  # Convert to 3-char code
+        bot.send_message(chat_id, f"Algılanan dil: {lang}")
+        final_result = subprocess.run(f'tesseract temp_content/{chat_id}_ocr_temp.jpg temp_content/{chat_id}_ocr -l {lang}', shell=True, capture_output=True, text=True)
+        if final_result.returncode != 0:
+            raise Exception(final_result.stderr)
+        os.remove(f'temp_content/{chat_id}_ocr_temp.jpg')
+        # send file to the user
+        bot.send_document(chat_id, open(f'temp_content/{chat_id}_ocr.txt', 'rb'))
+        os.remove(f'temp_content/{chat_id}_ocr.txt')
+
+    except Exception as e:
+        # remove temp files if exists
+        if os.path.exists(f'temp_content/{chat_id}_ocr_temp.jpg'):
+            os.remove(f'temp_content/{chat_id}_ocr_temp.jpg')
+        if os.path.exists(f'temp_content/{chat_id}_ocr_temp.txt'):
+            os.remove(f'temp_content/{chat_id}_ocr_temp.txt')
+        if os.path.exists(f'temp_content/{chat_id}_ocr.txt'):
+            os.remove(f'temp_content/{chat_id}_ocr.txt')
+        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+
 # command handlers
 
 ## start, help, info
@@ -1249,7 +1298,14 @@ def mood_handler(message):
         bot.send_video(message.chat.id, video = video_id, supports_streaming=True, width=1920, height=1080)
     except Exception as e:
         bot.send_message(message.chat.id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
-    
+
+## tesseract
+@bot.message_handler(commands=['tesseract'])
+def tesseract_handler(message):
+    if not access_control(message.chat.id):
+        return
+    bot.send_message(message.chat.id, "Lütfen görsel dosyasını gönderiniz.")
+    bot.register_next_step_handler_by_chat_id(message.chat.id, get_tesseract_image)
     
 ## pedro
 @bot.message_handler(commands=['pedro'])
@@ -1583,6 +1639,37 @@ def instagram_handler(message):
         bot.delete_message(call.message.chat.id, call.message.message_id)
         bot.send_message(call.message.chat.id, "Kullanıcı adınızı giriniz: (işlemi iptal etmek için 'cancel' yazabilirsiniz.)")
         bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_username)
+
+## system command
+@bot.message_handler(commands=['system'])
+def system_exec_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    try:
+        command_message = message.text.split(' ', 1)[1]
+        
+        # Run the command and capture output and exit code
+        result = subprocess.run(command_message, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            # current telegram message limit is 4096 characters just make 4000 to be safe
+            if len(result.stdout) > 4000:
+                # dump the output to a file
+                dump_file = os.path.join(os.getcwd(), 'temp_content', f'{message.message_id}_system_output.txt')
+                with open(dump_file, 'w') as f:
+                    f.write(result.stdout)
+                # send the file
+                bot.send_document(message.chat.id, open(dump_file), 'rb')
+                os.remove(dump_file)
+                return
+            bot.send_message(message.chat.id, result.stdout or "Command executed successfully but returned no output.")
+        else:
+            error_message = f"Error executing command '{command_message}':\n{result.stderr}"
+            bot.send_message(message.chat.id, error_message)
+    except Exception as e:
+        error_message = f"An unexpected error occurred while executing command '{command_message}': {str(e)}\n\n"
+        error_message += "Traceback:\n" + traceback.format_exc()
+        bot.send_message(message.chat.id, error_message)
                 
 ## hostname -- eduroam uses dynamic ip, after rebooting the pi, the ip may change
 @bot.message_handler(commands=['hostname'])
@@ -1592,6 +1679,22 @@ def hostname_handler(message):
     output = (os.popen('hostname -I').read()).strip().split(" ")
     for out in output:
         bot.send_message(message.chat.id, out)
+
+## save the forwarded video
+@bot.message_handler(content_types=['video'])
+def sabri_handler(message):
+    if not access_control(message.chat.id, admin=True, quiet=True):
+        return
+    try:
+        global VIDEO_FOLDER
+        video_id = message.video.file_id
+        file_info = bot.get_file(video_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        with open(os.path.join(VIDEO_FOLDER, f'{video_id}.mp4'), 'wb') as f:
+            f.write(downloaded_file)
+        bot.reply_to(message, f"{video_id}")
+    except Exception as e:
+        bot.send_message(message.chat.id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
     
 ## exit
 @bot.message_handler(commands=['exit'])
