@@ -26,6 +26,9 @@ train_services = {}
 usernames = {}
 instagram_command_flags = {}
 
+# change them to your own paths
+VIDEO_FOLDER = os.path.join(os.getcwd(), 'credentials', 'instagram', 'tutun.sabri_raspi', 'content')
+
 
 class CustomPopen(subprocess.Popen):
     creation_time = None
@@ -1626,6 +1629,22 @@ def hostname_handler(message):
     output = (os.popen('hostname -I').read()).strip().split(" ")
     for out in output:
         bot.send_message(message.chat.id, out)
+
+## save the forwarded video
+@bot.message_handler(content_types=['video'])
+def sabri_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    try:
+        global VIDEO_FOLDER
+        video_id = message.video.file_id
+        file_info = bot.get_file(video_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        with open(os.path.join(VIDEO_FOLDER, f'{video_id}.mp4'), 'wb') as f:
+            f.write(downloaded_file)
+        bot.reply_to(message, f"{video_id}")
+    except Exception as e:
+        bot.send_message(message.chat.id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
     
 ## exit
 @bot.message_handler(commands=['exit'])
