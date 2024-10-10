@@ -10,6 +10,7 @@ import random
 import telebot
 import datetime
 import requests
+import traceback
 import subprocess
 from telebot import types
 from yht_helper import YHTHelper
@@ -1583,6 +1584,37 @@ def instagram_handler(message):
         bot.delete_message(call.message.chat.id, call.message.message_id)
         bot.send_message(call.message.chat.id, "Kullanıcı adınızı giriniz: (işlemi iptal etmek için 'cancel' yazabilirsiniz.)")
         bot.register_next_step_handler_by_chat_id(call.message.chat.id, get_instagram_username)
+
+## system command
+@bot.message_handler(commands=['system'])
+def system_exec_handler(message):
+    if not access_control(message.chat.id, admin=True):
+        return
+    try:
+        command_message = message.text.split(' ', 1)[1]
+        
+        # Run the command and capture output and exit code
+        result = subprocess.run(command_message, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            # current telegram message limit is 4096 characters just make 4000 to be safe
+            if len(result.stdout) > 4000:
+                # dump the output to a file
+                dump_file = os.path.join(os.getcwd(), 'temp_content', f'{message.message_id}_system_output.txt')
+                with open(dump_file, 'w') as f:
+                    f.write(result.stdout)
+                # send the file
+                bot.send_document(message.chat.id, open(dump_file), 'rb')
+                os.remove(dump_file)
+                return
+            bot.send_message(message.chat.id, result.stdout or "Command executed successfully but returned no output.")
+        else:
+            error_message = f"Error executing command '{command_message}':\n{result.stderr}"
+            bot.send_message(message.chat.id, error_message)
+    except Exception as e:
+        error_message = f"An unexpected error occurred while executing command '{command_message}': {str(e)}\n\n"
+        error_message += "Traceback:\n" + traceback.format_exc()
+        bot.send_message(message.chat.id, error_message)
                 
 ## hostname -- eduroam uses dynamic ip, after rebooting the pi, the ip may change
 @bot.message_handler(commands=['hostname'])
