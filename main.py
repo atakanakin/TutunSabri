@@ -13,6 +13,8 @@ import requests
 import traceback
 import subprocess
 from telebot import types
+from langdetect import detect
+from langcodes import Language
 from yht_helper import YHTHelper
 from youtube_helper import YoutubeHelper
 from dropbox_helper import DropBoxUpload
@@ -1681,7 +1683,7 @@ def hostname_handler(message):
 ## save the forwarded video
 @bot.message_handler(content_types=['video'])
 def sabri_handler(message):
-    if not access_control(message.chat.id, admin=True):
+    if not access_control(message.chat.id, admin=True, quiet=True):
         return
     try:
         global VIDEO_FOLDER
