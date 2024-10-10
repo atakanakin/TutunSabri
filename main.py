@@ -290,7 +290,7 @@ def file_handler(message, output:str, type: str):
     os.remove(output)
             
 # check if the user is in the white list
-def access_control(chat_id, admin: bool = False):
+def access_control(chat_id, admin: bool = False, quiet: bool = False):
     global whitelist, bot, owner_id
     chat_id = str(chat_id)
     if chat_id == owner_id:
@@ -298,30 +298,32 @@ def access_control(chat_id, admin: bool = False):
     elif chat_id in whitelist and not admin:
         return True
     elif chat_id in whitelist and admin:
-        bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Bu işlemi sadece [@atakan](tg://user?id={owner_id}) yapabilir.', parse_mode='Markdown')
+        if not quiet:
+            bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Bu işlemi sadece [@atakan](tg://user?id={owner_id}) yapabilir.', parse_mode='Markdown')
         return False
     else:
-        # inline keyboard markup
-        keyboard = types.InlineKeyboardMarkup(row_width=2)
-        request_button = types.InlineKeyboardButton("Yetki İste  \U0001F6A7", callback_data='request')
-        cancel_button = types.InlineKeyboardButton("İptal  \U0000274C", callback_data='cancel')
-        keyboard.add(request_button, cancel_button)
-        bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Botu kullanabilmek için [@atakan](tg://user?id={owner_id}) kullanıcısından yetki isteyebilirsiniz.', parse_mode='Markdown', reply_markup=keyboard)
-        # handle the callback
-        @bot.callback_query_handler(func=lambda call: call.data == 'request')
-        def request(call):
-            bot.send_message(owner_id, f'[{call.message.chat.username}](tg://user?id={call.message.chat.id}) kullanıcısı yetki istiyor.', parse_mode='Markdown')
-            # log the request
-            request_file = os.path.join(os.getcwd(), 'requests', f'{call.message.chat.id}.txt')
-            f = open(request_file, 'w')
-            # log first name, last name, username, chat id, date
-            f.write(f'{call.message.chat.first_name} {call.message.chat.last_name}\n{call.message.chat.username}\n{call.message.chat.id}\n{call.message.date}')
-            f.close()            
-            bot.send_message(call.message.chat.id, "Yetki isteğiniz gönderildi. Lütfen bekleyin.")
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
-        def cancel(call):
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+        if not quiet:
+            # inline keyboard markup
+            keyboard = types.InlineKeyboardMarkup(row_width=2)
+            request_button = types.InlineKeyboardButton("Yetki İste  \U0001F6A7", callback_data='request')
+            cancel_button = types.InlineKeyboardButton("İptal  \U0000274C", callback_data='cancel')
+            keyboard.add(request_button, cancel_button)
+            bot.send_message(chat_id, f'Bu işlemi yapmaya yetkiniz yok. Botu kullanabilmek için [@atakan](tg://user?id={owner_id}) kullanıcısından yetki isteyebilirsiniz.', parse_mode='Markdown', reply_markup=keyboard)
+            # handle the callback
+            @bot.callback_query_handler(func=lambda call: call.data == 'request')
+            def request(call):
+                bot.send_message(owner_id, f'[{call.message.chat.username}](tg://user?id={call.message.chat.id}) kullanıcısı yetki istiyor.', parse_mode='Markdown')
+                # log the request
+                request_file = os.path.join(os.getcwd(), 'requests', f'{call.message.chat.id}.txt')
+                f = open(request_file, 'w')
+                # log first name, last name, username, chat id, date
+                f.write(f'{call.message.chat.first_name} {call.message.chat.last_name}\n{call.message.chat.username}\n{call.message.chat.id}\n{call.message.date}')
+                f.close()            
+                bot.send_message(call.message.chat.id, "Yetki isteğiniz gönderildi. Lütfen bekleyin.")
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            @bot.callback_query_handler(func=lambda call: call.data == 'cancel')
+            def cancel(call):
+                bot.delete_message(call.message.chat.id, call.message.message_id)
         return False
     
 def gramaddict_yaml_file(chat_id):
