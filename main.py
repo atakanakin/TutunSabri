@@ -1659,7 +1659,7 @@ def system_exec_handler(message):
                 with open(dump_file, 'w') as f:
                     f.write(result.stdout)
                 # send the file
-                bot.send_document(message.chat.id, open(dump_file), 'rb')
+                bot.send_document(message.chat.id, open(dump_file, 'rb'))
                 os.remove(dump_file)
                 return
             bot.send_message(message.chat.id, result.stdout or "Command executed successfully but returned no output.")
