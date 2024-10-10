@@ -18,9 +18,9 @@ gramaddict==3.2.12
 dropbox==11.36.2
 psutil==5.8.0
 telebot==0.0.5
-picamera==1.13
 selenium==4.0.0a1
 edge-tts==6.1.10
 pillow==10.3.0
 bs4==0.0.2
 inputimeout==1.0.4
+picamera==1.13
