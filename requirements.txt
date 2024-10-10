@@ -5,6 +5,7 @@ uiautomator2==2.16.14
 urllib3==1.26.18
 emoji==1.6.1
 langdetect==1.0.9
+langcodes==3.4.1
 atomicwrites==1.4.0
 spintax==1.0.4
 requests==2.31.0

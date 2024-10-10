@@ -897,6 +897,47 @@ def get_instagram_password(message):
             return
     except Exception as e:
         bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+
+# tesseract ocr
+def get_tesseract_image(message):
+    try:
+        chat_id = message.chat.id
+        if message.content_type != 'photo':
+            bot.send_message(chat_id, "Hata: Lütfen bir fotoğraf gönderiniz. İşlem iptal edildi.")
+            return
+        file_id = message.photo[-1].file_id
+        file_info = bot.get_file(file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        with open(f'temp_content/{chat_id}_ocr_temp.jpg', 'wb') as new_file:
+            new_file.write(downloaded_file)
+        result_raw = subprocess.run(f'tesseract temp_content/{chat_id}_ocr_temp.jpg temp_content/{chat_id}_ocr_temp', shell=True, capture_output=True, text=True)
+        if result_raw.returncode != 0:
+            raise Exception(result_raw.stderr)
+        with open(f'temp_content/{chat_id}_ocr_temp.txt', 'r') as f:
+            temp_result = f.read()
+        # remove the temp file
+        os.remove(f'temp_content/{chat_id}_ocr_temp.txt')
+        detected_lang = detect(temp_result)  # Detect language
+        lang = Language.get(detected_lang).to_alpha3()  # Convert to 3-char code
+        bot.send_message(chat_id, f"Algılanan dil: {lang}")
+        final_result = subprocess.run(f'tesseract temp_content/{chat_id}_ocr_temp.jpg temp_content/{chat_id}_ocr -l {lang}', shell=True, capture_output=True, text=True)
+        if final_result.returncode != 0:
+            raise Exception(final_result.stderr)
+        os.remove(f'temp_content/{chat_id}_ocr_temp.jpg')
+        # send file to the user
+        bot.send_document(chat_id, open(f'temp_content/{chat_id}_ocr.txt', 'rb'))
+        os.remove(f'temp_content/{chat_id}_ocr.txt')
+
+    except Exception as e:
+        # remove temp files if exists
+        if os.path.exists(f'temp_content/{chat_id}_ocr_temp.jpg'):
+            os.remove(f'temp_content/{chat_id}_ocr_temp.jpg')
+        if os.path.exists(f'temp_content/{chat_id}_ocr_temp.txt'):
+            os.remove(f'temp_content/{chat_id}_ocr_temp.txt')
+        if os.path.exists(f'temp_content/{chat_id}_ocr.txt'):
+            os.remove(f'temp_content/{chat_id}_ocr.txt')
+        bot.send_message(chat_id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
+
 # command handlers
 
 ## start, help, info
@@ -1255,7 +1296,14 @@ def mood_handler(message):
         bot.send_video(message.chat.id, video = video_id, supports_streaming=True, width=1920, height=1080)
     except Exception as e:
         bot.send_message(message.chat.id, f'Bu mesajı aldıysan bir şeyler çok yanlış ve büyük ihtimalle benimle ilgili değil. {e}')
-    
+
+## tesseract
+@bot.message_handler(commands=['tesseract'])
+def tesseract_handler(message):
+    if not access_control(message.chat.id):
+        return
+    bot.send_message(message.chat.id, "Lütfen görsel dosyasını gönderiniz.")
+    bot.register_next_step_handler_by_chat_id(message.chat.id, get_tesseract_image)
     
 ## pedro
 @bot.message_handler(commands=['pedro'])
