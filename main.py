@@ -7,6 +7,7 @@ import psutil
 import signal
 import locale
 import random
+import logging
 import telebot
 import datetime
 import requests
@@ -1725,5 +1726,20 @@ def exit_handler(message):
     # reboot
     os.system('sudo reboot')
 
+# logger config
+logger = telebot.logger
+logger.setLevel(logging.INFO)
+fh = logging.FileHandler('bot.log')
+fh.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
 # Start the bot
-bot.polling()
+while True:
+    try:
+        bot.infinity_polling(timeout=30, long_polling_timeout=10)
+    except Exception as e:
+        print(f'Error: {e}', flush=True)
+        time.sleep(5)
+        continue
