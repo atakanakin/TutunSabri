@@ -5,8 +5,5 @@
         "CHAT_ID_0",
         "CHAT_ID_1",
         "CHAT_ID_2"
-    ],
-    "dropbox_app_key": "DROPBOX_APP_KEY",
-    "dropbox_app_secret": "DROPBOX_APP_SECRET",
-    "dropbox_oauth2_refresh_token": "DROPBOX_OAUTH2_REFRESH_TOKEN"
+    ]
 }

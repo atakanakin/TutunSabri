@@ -16,7 +16,7 @@ moviepy==1.0.3
 pycryptodomex==3.20.0
 instagrapi==2.1.1
 gramaddict==3.2.12
-dropbox==11.36.2
+# dropbox==11.36.2
 psutil==5.8.0
 telebot==0.0.5
 selenium==4.0.0a1
