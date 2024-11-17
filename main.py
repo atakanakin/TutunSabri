@@ -47,9 +47,6 @@ with open('bot_config.json') as f:
     token = data['bot_token']
     owner_id = data['owner_id']
     whitelist = data['white_list']
-    dropbox_app_key = data['dropbox_app_key']
-    dropbox_app_secret = data['dropbox_app_secret']
-    dropbox_oauth2_refresh_token = data['dropbox_oauth2_refresh_token']
     
 # get the station names for the yht command
 get_all_stations()
@@ -278,7 +275,7 @@ def file_handler(message, output:str, type: str):
                 bot.send_message(message.chat.id, f'Dosyayı servera yüklerken bir hata oluştu. {result.stderr}')
             else:
                 bot.send_message(message.chat.id, text= f'Dosyayı indirmek için <a href="{result.stdout}">bu linki</a> kullanabilirsin. Dosya 3 gün sonra silinecektir. Terminal üzerinden indirmek için komut:', parse_mode='HTML')
-                bot.send_message(message.chat.id, f'curl -X POST {result.stdout} --output {output.split("/")[-1]}', parse_mode='Markdown')
+                bot.send_message(message.chat.id, f'curl -X POST {result.stdout} --output {result.stdout.split("/")[-1]}')
         except Exception as e:
             bot.send_message(message.chat.id, f'Buluta yüklenirken bir hata oluştu. {e}')
     finally:
