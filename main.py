@@ -18,7 +18,6 @@ from langdetect import detect
 from langcodes import Language
 from yht_helper import YHTHelper
 from youtube_helper import YoutubeHelper
-from dropbox_helper import DropBoxUpload
 from yht.station_helper import get_all_stations
 from yht.station_helper import get_proper_station
 
@@ -54,9 +53,6 @@ with open('bot_config.json') as f:
     
 # get the station names for the yht command
 get_all_stations()
-
-# create a dropbox upload object
-dbu = DropBoxUpload(dropbox_app_key, dropbox_app_secret, dropbox_oauth2_refresh_token)
 
 # create a bot object
 bot = telebot.TeleBot(token)
@@ -266,34 +262,27 @@ def create_process_list_message(chat_id):
 ## handle the file and send it to the user
 def file_handler(message, output:str, type: str):
     global bot
-    global dbu
-    file = open(output, 'rb')
-    if(type == 'audio'):
+    try:
+        file = open(output, 'rb')
+        if(type == 'audio'):
+            bot.send_audio(message.chat.id, audio = file)      
+        elif(type == 'video'):
+            bot.send_video(message.chat.id, video = file, supports_streaming=True, width=1920, height=1080)
+        file.close()
+    except Exception as e:
+        file.close()
+        bot.send_message(message.chat.id, f'Dosya boyutu çok büyük. Buluta yükleniyor...')
         try:
-            bot.send_audio(message.chat.id, audio = file)
+            result = subprocess.run(f'curl -F "file=@{output}" https://temp.sh/upload', shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                bot.send_message(message.chat.id, f'Dosyayı servera yüklerken bir hata oluştu. {result.stderr}')
+            else:
+                bot.send_message(message.chat.id, text= f'Dosyayı indirmek için <a href="{result.stdout}">bu linki</a> kullanabilirsin. Dosya 3 gün sonra silinecektir. Terminal üzerinden indirmek için komut:', parse_mode='HTML')
+                bot.send_message(message.chat.id, f'curl -X POST {result.stdout} --output {output.split("/")[-1]}', parse_mode='Markdown')
         except Exception as e:
-            bot.send_message(message.chat.id, f'Ses dosyasını dropboxa yüklüyorum...')
-            bot.send_message(message.chat.id, f'Video 1 gün sonra silinecektir.')
-            try:
-                audUrl = dbu.UpLoadFile('',output)
-                bot.send_message(message.chat.id, text= f'<a href="{audUrl}">Ses dosyasını indir</a>', parse_mode='HTML')
-            except Exception as dropboxError:
-                bot.send_message(message.chat.id, f'Dropboxa yüklenirken bir hata oluştu.')
-                
-    elif(type == 'video'):
-        try:
-            file_id = bot.send_video(message.chat.id, video = file, supports_streaming=True, width=1920, height=1080)
-            print(file_id.video.file_id) #TODO: Remove this line
-        except Exception as e:
-            bot.send_message(message.chat.id, f'Videoyu dropboxa yüklüyorum...')
-            bot.send_message(message.chat.id, f'Video 1 gün sonra silinecektir.')
-            try:
-                vidUrl = dbu.UpLoadFile('',output)
-                bot.send_message(message.chat.id, text= f'<a href="{vidUrl}">Videoyu indir</a>', parse_mode='HTML')
-            except Exception as dropboxError:
-                bot.send_message(message.chat.id, f'Dropboxa yüklenirken bir hata oluştu.')
-    file.close()
-    os.remove(output)
+            bot.send_message(message.chat.id, f'Buluta yüklenirken bir hata oluştu. {e}')
+    finally:
+        os.remove(output)
             
 # check if the user is in the white list
 def access_control(chat_id, admin: bool = False, quiet: bool = False):

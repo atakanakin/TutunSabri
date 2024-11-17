@@ -1,4 +1,5 @@
 '''
+***DEPRECATED***
 Special thanks to the author of this code: Jae Won Choi
 Github: https://github.com/jwc-rad 
 Medium: https://jwc-rad.medium.com/
