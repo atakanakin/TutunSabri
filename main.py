@@ -1726,4 +1726,10 @@ def exit_handler(message):
     os.system('sudo reboot')
 
 # Start the bot
-bot.polling()
+while True:
+    try:
+        bot.infinity_polling(timeout=30, long_polling_timeout=10)
+    except Exception as e:
+        print(f'Error: {e}', flush=True)
+        time.sleep(5)
+        continue
