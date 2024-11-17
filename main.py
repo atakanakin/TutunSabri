@@ -7,6 +7,7 @@ import psutil
 import signal
 import locale
 import random
+import logging
 import telebot
 import datetime
 import requests
@@ -1724,6 +1725,15 @@ def exit_handler(message):
     dump_active_process()
     # reboot
     os.system('sudo reboot')
+
+# logger config
+logger = telebot.logger
+logger.setLevel(logging.INFO)
+fh = logging.FileHandler('bot.log')
+fh.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+logger.addHandler(fh)
 
 # Start the bot
 while True:
