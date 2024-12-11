@@ -18,8 +18,7 @@ from langdetect import detect
 from langcodes import Language
 from yht_helper import YHTHelper
 from youtube_helper import YoutubeHelper
-from yht.station_helper import get_all_stations
-from yht.station_helper import get_proper_station
+from yht.station_helper import get_all_stations, get_proper_station, yht_hour_helper
 
 # global variables
 active_process = {}
@@ -358,69 +357,6 @@ def configure_yaml_file(config_file, to_add):
     f.write('working-hours: [00.00-23.59]\n')
     f.write(to_add)
     f.close()
-    
-def yht_hour_helper(departure :str, arrival: str, date:str):
-    url = "https://api-yebsp.tcddtasimacilik.gov.tr/sefer/seferSorgula"
-    
-    locale.setlocale(locale.LC_TIME, 'en_US.utf8')
-    user_date_obj = datetime.datetime.strptime(date, "%d.%m.%Y")
-    final_user_date = user_date_obj.strftime("%b %d, %Y 00:00:00 AM")
-
-    # Define the headers for the request
-    headers = {
-        "Host": "api-yebsp.tcddtasimacilik.gov.tr",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br, zstd",
-        "Authorization": "Basic ZGl0cmF2b3llYnNwOmRpdHJhMzQhdm8u",
-        "Content-Type": "application/json",
-        "Origin": "https://bilet.tcdd.gov.tr",
-        "Connection": "keep-alive",
-        "Referer": "https://bilet.tcdd.gov.tr/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "cross-site",
-        "Priority": "u=1"
-    }
-
-    # Define the payload for the request
-    payload = {
-        "kanalKodu": 3,
-        "dil": 0,
-        "seferSorgulamaKriterWSDVO": {
-            "satisKanali": 3,
-            "binisIstasyonu": departure,
-            "binisIstasyonu_isHaritaGosterimi": False,
-            "inisIstasyonu": arrival,
-            "inisIstasyonu_isHaritaGosterimi": False,
-            "seyahatTuru": 1,
-            "gidisTarih": final_user_date,
-            "bolgeselGelsin": False,
-            "islemTipi": 0,
-            "yolcuSayisi": 1,
-            "aktarmalarGelsin": True,
-        }
-    }
-    
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
-    
-    trains = response.json()
-    
-    try:
-        if trains["seferSorgulamaSonucList"] == None:
-            return []
-        
-        hours_list = []
-        
-        for train in trains["seferSorgulamaSonucList"]:
-            locale.setlocale(locale.LC_TIME, 'en_US.utf8')
-            date_obj = datetime.datetime.strptime(train["binisTarih"], "%b %d, %Y %I:%M:%S %p")
-            hours_list.append(date_obj.strftime("%H:%M"))
-        hours_list.sort()
-        return hours_list
-    except Exception as e:
-        return []
 
 # next step handlers
 
@@ -645,7 +581,7 @@ def callback_yht_hour(message):
     bot.send_message(chat_id, "İşlem başlatılıyor...\nLütfen bekleyin.", reply_markup=reply_markup)
     bot.send_message(chat_id, 'Arama işlemini durdurmak istediğinde /yhtcancel komutunu kullanabilirsin.')
     # call the reservation
-    python_file = os.path.join(os.getcwd(), 'yht', 'yht_v2.py')
+    python_file = os.path.join(os.getcwd(), 'yht', 'yht_v3.py')
     arguments = [token, str(chat_id), train_services[chat_id].departure_station, train_services[chat_id].arrival_station, train_services[chat_id].date, train_services[chat_id].hour]
     
     process_handler(['python', python_file] + arguments, False, 'yht', chat_id)
