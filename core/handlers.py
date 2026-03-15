@@ -216,6 +216,11 @@ async def _set_role_for_user(
     await message.answer(
         f"Kullanıcının rolü güncellendi: `{telegram_user_id}` -> `{role.value}`"
     )
+    if role == UserRole.premium:
+        await message.bot.send_message(
+            telegram_user_id,
+            "Premium'a yükseltildiniz. Aynı anda 5 bilet arayabilirsiniz.",
+        )
 
 
 @router.message(Command("start"))
