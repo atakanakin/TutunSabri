@@ -72,3 +72,29 @@ def format_route_sentence(
         f"*{from_station} -> {to_station}* güzergâhında "
         f"*{format_turkish_datetime_long(travel_date, travel_hour)}* tarihli trende"
     )
+
+
+def format_last_result_text(last_result: str) -> str:
+    text = (last_result or "").strip()
+    if not text:
+        return ""
+
+    mappings = {
+        "checking availability": "Uygun koltuk kontrol ediliyor.",
+        "train not found for selected departure": "Seçilen saatte uygun tren bulunamadı.",
+        "availability updated": "Son koltuk durumu güncellendi.",
+        "seat held": "Koltuk tutuldu.",
+        "seat released by user": "Koltuk kullanıcı tarafından bırakıldı.",
+        "seat release failed": "Koltuk bırakılırken bir sorun oluştu.",
+        "task cancelled by user": "İşlem kullanıcı tarafından iptal edildi.",
+        "hold retry limit reached": "Yeniden deneme sınırına ulaşıldı.",
+        "hold expired retrying": "Tutma süresi doldu, yeniden deneniyor.",
+        "recovered after restart": "İşlem yeniden başlatıldı ve devam ediyor.",
+        "missing hold details": "Tutulan koltuk bilgileri eksik.",
+        "user record missing": "Kullanıcı kaydı bulunamadı.",
+        "tcdd error": "TCDD tarafında geçici bir sorun oluştu.",
+        "unexpected error": "Beklenmeyen bir hata oluştu.",
+    }
+    if text in mappings:
+        return mappings[text]
+    return text

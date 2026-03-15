@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import SearchTask, SearchTaskStatus, User, UserRole
@@ -19,18 +19,21 @@ async def upsert_user(
     username: Optional[str],
     first_name: Optional[str],
     last_name: Optional[str],
+    force_role: Optional[UserRole] = None,
+    force_active: bool = False,
 ) -> User:
     result = await session.execute(
         select(User).where(User.telegram_user_id == telegram_user_id),
     )
     user = result.scalar_one_or_none()
+    target_role = force_role or UserRole.basic
     if user is None:
         user = User(
             telegram_user_id=telegram_user_id,
             username=username,
             first_name=first_name,
             last_name=last_name,
-            role=UserRole.basic,
+            role=target_role,
             is_active=True,
         )
         session.add(user)
@@ -38,8 +41,12 @@ async def upsert_user(
         user.username = username
         user.first_name = first_name
         user.last_name = last_name
-        if user.role == UserRole.user:
+        if force_role is not None:
+            user.role = force_role
+        elif user.role == UserRole.user:
             user.role = UserRole.basic
+        if force_active:
+            user.is_active = True
     await session.commit()
     await session.refresh(user)
     return user
@@ -269,6 +276,33 @@ async def get_all_open_tasks(session: AsyncSession) -> list[SearchTask]:
     return list(result.scalars().all())
 
 
+async def get_stale_open_tasks(
+    session: AsyncSession,
+    *,
+    stale_before: datetime,
+) -> list[SearchTask]:
+    result = await session.execute(
+        select(SearchTask)
+        .where(
+            SearchTask.status.in_(
+                [
+                    SearchTaskStatus.pending,
+                    SearchTaskStatus.running,
+                    SearchTaskStatus.seat_held,
+                ]
+            )
+        )
+        .where(
+            or_(
+                SearchTask.last_checked_at.is_(None),
+                SearchTask.last_checked_at < stale_before,
+            )
+        )
+        .order_by(SearchTask.created_at.desc(), SearchTask.id.desc())
+    )
+    return list(result.scalars().all())
+
+
 async def create_or_refresh_access_request(
     session: AsyncSession,
     *,
@@ -426,36 +460,6 @@ async def reject_access_request(
     return access_request
 
 
-async def upsert_admin_user(
-    session: AsyncSession,
-    *,
-    telegram_user_id: int,
-    username: Optional[str],
-    first_name: Optional[str],
-    last_name: Optional[str],
-) -> User:
-    user = await get_user_by_telegram_id(session, telegram_user_id)
-    if user is None:
-        user = User(
-            telegram_user_id=telegram_user_id,
-            username=username,
-            first_name=first_name,
-            last_name=last_name,
-            role=UserRole.admin,
-            is_active=True,
-        )
-        session.add(user)
-    else:
-        user.username = username
-        user.first_name = first_name
-        user.last_name = last_name
-        user.role = UserRole.admin
-        user.is_active = True
-    await session.commit()
-    await session.refresh(user)
-    return user
-
-
 async def set_task_message_id(
     session: AsyncSession,
     *,
@@ -576,5 +580,5 @@ async def cancel_task(session: AsyncSession, task_id: str) -> Optional[SearchTas
         session,
         task_id=task_id,
         status=SearchTaskStatus.cancelled,
-        last_result="Cancelled by user.",
+        last_result="task cancelled by user",
     )

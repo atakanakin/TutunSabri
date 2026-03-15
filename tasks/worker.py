@@ -107,6 +107,7 @@ async def monitor_yht_task(task_id: str) -> None:
     try:
         while True:
             sleep_seconds = yht_settings.poll_interval_seconds
+            now = datetime.now(timezone.utc)
             async with SessionFactory() as session:
                 task = await get_task_by_public_id(session, task_id)
                 if task is None:
@@ -133,10 +134,11 @@ async def monitor_yht_task(task_id: str) -> None:
 
                 if task.status == SearchTaskStatus.seat_held:
                     expires_at = task.hold_expires_at
-                    now = datetime.now(timezone.utc)
                     if expires_at is not None and expires_at.tzinfo is None:
                         expires_at = expires_at.replace(tzinfo=timezone.utc)
                     if expires_at is not None and expires_at > now:
+                        task.last_checked_at = now
+                        await session.commit()
                         remaining_seconds = int((expires_at - now).total_seconds())
                         sleep_seconds = max(
                             1,
@@ -178,7 +180,7 @@ async def monitor_yht_task(task_id: str) -> None:
                         task.hold_expires_at = None
                         task.status = SearchTaskStatus.running
                         task.last_checked_at = now
-                        task.last_result = f"hold expired, retrying ({attempts}/{yht_settings.max_hold_attempts})"
+                        task.last_result = "hold expired retrying"
                         await session.commit()
                         await bot.send_message(
                             user.telegram_user_id,
@@ -215,7 +217,7 @@ async def monitor_yht_task(task_id: str) -> None:
                             if error_count >= yht_settings.max_poll_errors
                             else SearchTaskStatus.running
                         ),
-                        last_result=f"tcdd error: {exc}",
+                        last_result="tcdd error",
                     )
                     if error_count >= yht_settings.max_poll_errors:
                         await bot.send_message(
@@ -236,7 +238,7 @@ async def monitor_yht_task(task_id: str) -> None:
                             if error_count >= yht_settings.max_poll_errors
                             else SearchTaskStatus.running
                         ),
-                        last_result=f"unexpected error: {exc}",
+                        last_result="unexpected error",
                     )
                     if error_count >= yht_settings.max_poll_errors:
                         await bot.send_message(
@@ -280,7 +282,7 @@ async def monitor_yht_task(task_id: str) -> None:
                             train_car_id=int(hold_result["train_car_id"]),
                             allocation_id=str(hold_result["allocation_id"]),
                             seat_number=str(hold_result["seat_number"]),
-                            last_result=message,
+                            last_result="seat held",
                         )
                         await bot.send_message(user.telegram_user_id, message)
                         sleep_seconds = yht_settings.poll_interval_seconds
@@ -294,16 +296,12 @@ async def monitor_yht_task(task_id: str) -> None:
                             outgoing_messages.append(
                                 _business_message(task, availability.business_available)
                             )
-                        snapshot_text = (
-                            f"economy={availability.economy_available}, "
-                            f"business={availability.business_available}"
-                        )
                         await update_task_counts(
                             session,
                             task_id=task_id,
                             economy_count=availability.economy_available,
                             business_count=availability.business_available,
-                            last_result=snapshot_text,
+                            last_result="availability updated",
                         )
                         for outgoing_message in outgoing_messages:
                             await bot.send_message(

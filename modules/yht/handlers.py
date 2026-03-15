@@ -27,6 +27,7 @@ from modules.yht.logic import TCDDClient, YHTError
 from modules.yht.config import yht_settings
 from modules.yht.utils import (
     build_choice_keyboard,
+    format_last_result_text,
     format_route_sentence,
     format_turkish_date_short,
     format_turkish_datetime_long,
@@ -179,7 +180,7 @@ async def _release_held_task(message: Message, task, db_user: User) -> bool:
                 session,
                 task_id=fresh_task.task_id,
                 status=SearchTaskStatus.failed,
-                last_result=f"release failed: {exc}",
+                last_result="seat release failed",
             )
             await _notify_admins(
                 message,
@@ -711,7 +712,7 @@ async def handle_yht_info(message: Message, db_user: User) -> None:
         lines.append(f"{index}.")
         lines.append(_format_task_summary(task))
         if task.last_result:
-            lines.append(f"*Son durum:* {task.last_result}")
+            lines.append(f"*Son durum:* {format_last_result_text(task.last_result)}")
     await message.answer("\n".join(lines))
 
 
