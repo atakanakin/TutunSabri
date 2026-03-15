@@ -95,6 +95,7 @@ def _hold_message(task, hold_result: dict, hold_attempt_count: int) -> str:
 async def monitor_yht_task(task_id: str) -> None:
     client = TCDDClient()
     error_count = 0
+    sleep_seconds = yht_settings.poll_interval_seconds
     bot = Bot(
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
@@ -102,6 +103,7 @@ async def monitor_yht_task(task_id: str) -> None:
 
     try:
         while True:
+            sleep_seconds = yht_settings.poll_interval_seconds
             async with SessionFactory() as session:
                 task = await get_task_by_public_id(session, task_id)
                 if task is None:
@@ -114,6 +116,9 @@ async def monitor_yht_task(task_id: str) -> None:
                         status=SearchTaskStatus.failed,
                         last_result="Görev sahibine ait kullanıcı kaydı bulunamadı.",
                     )
+                    return
+
+                if task.status in {SearchTaskStatus.completed, SearchTaskStatus.failed}:
                     return
 
                 if task.status == SearchTaskStatus.cancelled:
@@ -129,7 +134,11 @@ async def monitor_yht_task(task_id: str) -> None:
                     if expires_at is not None and expires_at.tzinfo is None:
                         expires_at = expires_at.replace(tzinfo=timezone.utc)
                     if expires_at is not None and expires_at > now:
-                        pass
+                        remaining_seconds = int((expires_at - now).total_seconds())
+                        sleep_seconds = max(
+                            1,
+                            min(yht_settings.poll_interval_seconds, remaining_seconds),
+                        )
                     else:
                         attempts = task.hold_attempt_count or 0
                         if (
@@ -182,6 +191,7 @@ async def monitor_yht_task(task_id: str) -> None:
                         if task is None:
                             return
                     if task.status == SearchTaskStatus.seat_held:
+                        await asyncio.sleep(sleep_seconds)
                         continue
 
                 await update_task_status(
@@ -268,6 +278,7 @@ async def monitor_yht_task(task_id: str) -> None:
                             last_result=message,
                         )
                         await bot.send_message(user.telegram_user_id, message)
+                        sleep_seconds = yht_settings.poll_interval_seconds
                     else:
                         outgoing_messages = []
                         if task.last_economy_count != availability.economy_available:
@@ -291,6 +302,6 @@ async def monitor_yht_task(task_id: str) -> None:
                         )
                         for outgoing_message in outgoing_messages:
                             await bot.send_message(user.telegram_user_id, outgoing_message)
-            await asyncio.sleep(yht_settings.poll_interval_seconds)
+            await asyncio.sleep(sleep_seconds)
     finally:
         await bot.session.close()

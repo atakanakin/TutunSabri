@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 from typing import Optional
 
@@ -217,18 +218,19 @@ async def handle_processes(message: Message, db_user: User) -> None:
     if not tasks:
         await message.answer("Aktif çalışan YHT görevi bulunmuyor.")
         return
-    lines = ["*Aktif süreçler*"]
+    lines = ["<b>Aktif süreçler</b>"]
     for task in tasks:
         user = users_by_id.get(task.user_id)
         username = f"@{user.username}" if user and user.username else "-"
         lines.append(
-            f"*Görev:* `{task.task_id}`\n"
-            f"*Kullanıcı:* {username} (`{getattr(user, 'telegram_user_id', task.user_id)}`)\n"
-            f"*Durum:* {task.status.value}\n"
-            f"*Güzergâh:* {task.from_station} -> {task.to_station}\n"
-            f"*Kalkış:* {task.travel_date.isoformat()} {task.travel_hour}"
+            f"<b>Görev:</b> <code>{escape(task.task_id)}</code>\n"
+            f"<b>Kullanıcı:</b> {escape(username)} "
+            f"(<code>{getattr(user, 'telegram_user_id', task.user_id)}</code>)\n"
+            f"<b>Durum:</b> {escape(task.status.value)}\n"
+            f"<b>Güzergâh:</b> {escape(task.from_station)} -&gt; {escape(task.to_station)}\n"
+            f"<b>Kalkış:</b> {escape(task.travel_date.isoformat())} {escape(task.travel_hour)}"
         )
-    await message.answer("\n\n".join(lines))
+    await message.answer("\n\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("grant"))
