@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import SearchTask, SearchTaskStatus, User, UserRole
+from modules.yht.config import yht_settings
 
 
 async def upsert_user(
@@ -288,6 +289,10 @@ async def set_task_hold_details(
     task.train_car_id = train_car_id
     task.allocation_id = allocation_id
     task.seat_number = seat_number
+    task.hold_attempt_count = (task.hold_attempt_count or 0) + 1
+    task.hold_expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=yht_settings.hold_duration_minutes
+    )
     task.status = SearchTaskStatus.seat_held
     task.last_result = last_result
     task.last_checked_at = datetime.now(timezone.utc)
@@ -331,6 +336,7 @@ async def clear_task_hold_details(
     task.train_car_id = None
     task.allocation_id = None
     task.seat_number = None
+    task.hold_expires_at = None
     task.status = status
     task.last_result = last_result
     task.last_checked_at = datetime.now(timezone.utc)

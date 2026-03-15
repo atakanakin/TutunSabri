@@ -80,6 +80,10 @@ class SearchTask(Base):
     train_car_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     allocation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     seat_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    hold_attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    hold_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_economy_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_business_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[SearchTaskStatus] = mapped_column(

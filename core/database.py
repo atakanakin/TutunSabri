@@ -64,6 +64,8 @@ async def _apply_sqlite_compatibility_migrations(connection: AsyncSession) -> No
     await _ensure_column(connection, "search_tasks", "train_car_id", "INTEGER")
     await _ensure_column(connection, "search_tasks", "allocation_id", "VARCHAR(64)")
     await _ensure_column(connection, "search_tasks", "seat_number", "VARCHAR(32)")
+    await _ensure_column(connection, "search_tasks", "hold_attempt_count", "INTEGER DEFAULT 0")
+    await _ensure_column(connection, "search_tasks", "hold_expires_at", "DATETIME")
     await _ensure_column(connection, "search_tasks", "last_economy_count", "INTEGER")
     await _ensure_column(connection, "search_tasks", "last_business_count", "INTEGER")
 

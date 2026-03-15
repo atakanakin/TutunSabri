@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
@@ -76,6 +77,20 @@ def _business_message(task, business_count: int) -> str:
     )
 
 
+def _hold_message(task, hold_result: dict, hold_attempt_count: int) -> str:
+    return (
+        "*Koltuk tutuldu.*\n"
+        f"*Güzergâh:* {task.from_station} -> {task.to_station}\n"
+        f"*Tarih:* {task.travel_date.isoformat()} {task.travel_hour}\n"
+        f"*Vagon:* {hold_result['wagon_number']}\n"
+        f"*Koltuk:* {hold_result['seat_number']}\n"
+        f"*Deneme:* {hold_attempt_count}/{yht_settings.max_hold_attempts}\n"
+        f"*Süre:* Koltuk {yht_settings.hold_duration_minutes} dakika tutulacaktır.\n"
+        f"*Manuel bırakma:* `/yhtrelease {task.task_id}`\n"
+        f"*Otomatik işlem:* Süre dolarsa sistem en fazla {yht_settings.max_hold_attempts} kez yeniden tutmayı deneyecek."
+    )
+
+
 @broker.task
 async def monitor_yht_task(task_id: str) -> None:
     client = TCDDClient()
@@ -109,7 +124,63 @@ async def monitor_yht_task(task_id: str) -> None:
                     return
 
                 if task.status == SearchTaskStatus.seat_held:
-                    return
+                    expires_at = task.hold_expires_at
+                    now = datetime.now(timezone.utc)
+                    if expires_at is not None and expires_at > now:
+                        pass
+                    else:
+                        attempts = task.hold_attempt_count or 0
+                        if (
+                            task.train_car_id is not None
+                            and task.allocation_id is not None
+                            and task.seat_number is not None
+                        ):
+                            try:
+                                await client.release_seat(
+                                    train_car_id=task.train_car_id,
+                                    allocation_id=task.allocation_id,
+                                    seat_number=task.seat_number,
+                                )
+                            except Exception:
+                                pass
+
+                        if attempts >= yht_settings.max_hold_attempts:
+                            await update_task_status(
+                                session,
+                                task_id=task_id,
+                                status=SearchTaskStatus.completed,
+                                last_result="Koltuk tutma deneme limiti doldu.",
+                            )
+                            await bot.send_message(
+                                user.telegram_user_id,
+                                "*Koltuk tutma süresi doldu ve yeniden deneme limiti tamamlandı.*\n"
+                                "Arama görevi kapatıldı.",
+                            )
+                            return
+
+                        task.train_id = None
+                        task.train_car_id = None
+                        task.allocation_id = None
+                        task.seat_number = None
+                        task.hold_expires_at = None
+                        task.status = SearchTaskStatus.running
+                        task.last_checked_at = now
+                        task.last_result = (
+                            f"Koltuk tutma süresi doldu. Yeniden deneme hazırlanıyor "
+                            f"({attempts}/{yht_settings.max_hold_attempts})."
+                        )
+                        await session.commit()
+                        await bot.send_message(
+                            user.telegram_user_id,
+                            "*Tutulan koltuğun süresi doldu.*\n"
+                            f"Sistem yeniden koltuk tutmayı deneyecek "
+                            f"({attempts}/{yht_settings.max_hold_attempts}).",
+                        )
+                        task = await get_task_by_public_id(session, task_id)
+                        if task is None:
+                            return
+                    if task.status == SearchTaskStatus.seat_held:
+                        continue
 
                 await update_task_status(
                     session,
@@ -179,13 +250,11 @@ async def monitor_yht_task(task_id: str) -> None:
                             from_station=task.from_station,
                             to_station=task.to_station,
                         )
-                        message = (
-                            "*Koltuk tutuldu.*\n"
-                            f"*Güzergâh:* {task.from_station} -> {task.to_station}\n"
-                            f"*Tarih:* {task.travel_date.isoformat()} {task.travel_hour}\n"
-                            f"*Vagon:* {hold_result['wagon_number']}\n"
-                            f"*Koltuk:* {hold_result['seat_number']}\n"
-                            "*Bırakmak için:* /yhtrelease"
+                        hold_attempt_count = (task.hold_attempt_count or 0) + 1
+                        message = _hold_message(
+                            task,
+                            hold_result,
+                            hold_attempt_count,
                         )
                         await set_task_hold_details(
                             session,
@@ -197,7 +266,6 @@ async def monitor_yht_task(task_id: str) -> None:
                             last_result=message,
                         )
                         await bot.send_message(user.telegram_user_id, message)
-                        return
                     else:
                         outgoing_messages = []
                         if task.last_economy_count != availability.economy_available:

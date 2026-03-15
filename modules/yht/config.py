@@ -26,6 +26,8 @@ class YHTSettings(BaseSettings):
     unit_id: str = Field("3895", alias="TCDD_UNIT_ID")
     poll_interval_seconds: int = Field(30, alias="POLL_INTERVAL_SECONDS")
     max_poll_errors: int = Field(3, alias="MAX_POLL_ERRORS")
+    hold_duration_minutes: int = Field(10, alias="YHT_HOLD_DURATION_MINUTES")
+    max_hold_attempts: int = Field(3, alias="YHT_MAX_HOLD_ATTEMPTS")
     basic_user_max_parallel_tasks: int = Field(3, alias="YHT_BASIC_MAX_PARALLEL_TASKS")
     premium_user_max_parallel_tasks: int = Field(5, alias="YHT_PREMIUM_MAX_PARALLEL_TASKS")
     default_timezone: str = Field("Europe/Istanbul", alias="DEFAULT_TIMEZONE")
