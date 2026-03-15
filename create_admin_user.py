@@ -8,7 +8,8 @@ import httpx
 
 from core.config import settings
 from core.database import SessionFactory, init_database
-from core.repositories import upsert_admin_user
+from core.models import UserRole
+from core.repositories import upsert_user
 
 
 def _parse_chat_id(argv: list[str]) -> int:
@@ -39,12 +40,14 @@ async def _run(chat_id: int) -> None:
     await init_database()
     chat = await _fetch_chat(chat_id)
     async with SessionFactory() as session:
-        user = await upsert_admin_user(
+        user = await upsert_user(
             session,
             telegram_user_id=chat["id"],
             username=chat.get("username"),
             first_name=chat.get("first_name"),
             last_name=chat.get("last_name"),
+            force_role=UserRole.admin,
+            force_active=True,
         )
     print(f"Admin user ready: telegram_user_id={user.telegram_user_id} username={user.username!r}")
 
