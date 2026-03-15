@@ -126,6 +126,8 @@ async def monitor_yht_task(task_id: str) -> None:
                 if task.status == SearchTaskStatus.seat_held:
                     expires_at = task.hold_expires_at
                     now = datetime.now(timezone.utc)
+                    if expires_at is not None and expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
                     if expires_at is not None and expires_at > now:
                         pass
                     else:
