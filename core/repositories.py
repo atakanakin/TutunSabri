@@ -215,6 +215,13 @@ async def get_user_by_telegram_id(
     return result.scalar_one_or_none()
 
 
+async def get_all_users(session: AsyncSession) -> list[User]:
+    result = await session.execute(
+        select(User).order_by(User.created_at.asc(), User.id.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def get_first_admin_username(session: AsyncSession) -> Optional[str]:
     result = await session.execute(
         select(User.username)
@@ -232,6 +239,23 @@ async def get_admin_users(session: AsyncSession) -> list[User]:
         .where(User.role == UserRole.admin)
         .where(User.is_active.is_(True))
         .order_by(User.id.asc()),
+    )
+    return list(result.scalars().all())
+
+
+async def get_all_open_tasks(session: AsyncSession) -> list[SearchTask]:
+    result = await session.execute(
+        select(SearchTask)
+        .where(
+            SearchTask.status.in_(
+                [
+                    SearchTaskStatus.pending,
+                    SearchTaskStatus.running,
+                    SearchTaskStatus.seat_held,
+                ]
+            )
+        )
+        .order_by(SearchTask.created_at.desc(), SearchTask.id.desc())
     )
     return list(result.scalars().all())
 

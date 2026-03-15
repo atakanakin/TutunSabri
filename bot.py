@@ -8,6 +8,7 @@ from aiogram.enums import ParseMode
 
 from core.config import settings
 from core.database import init_database
+from core.handlers import router as core_router
 from core.middlewares import ActiveUserMiddleware, LoggingMiddleware
 from modules.yht.logic import TCDDClient
 from modules.yht.handlers import router as yht_router
@@ -24,7 +25,9 @@ async def run_bot() -> None:
     )
     dispatcher = Dispatcher()
     dispatcher.update.middleware(LoggingMiddleware())
-    dispatcher.update.middleware(ActiveUserMiddleware())
+    dispatcher.message.middleware(ActiveUserMiddleware())
+    dispatcher.callback_query.middleware(ActiveUserMiddleware())
+    dispatcher.include_router(core_router)
     dispatcher.include_router(yht_router)
     await dispatcher.start_polling(bot)
 

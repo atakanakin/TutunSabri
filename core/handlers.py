@@ -1,19 +1,28 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from core.database import SessionFactory
 from core.models import User, UserRole
 from core.repositories import (
     approve_access_request,
     create_or_refresh_access_request,
+    get_all_open_tasks,
+    get_all_users,
     get_admin_users,
     get_first_admin_username,
     get_pending_access_requests,
+    get_user_by_id,
     mark_access_request_notified,
     reject_access_request,
     revoke_user_access,
@@ -21,6 +30,8 @@ from core.repositories import (
 
 
 router = Router(name="core")
+INFO_DIR = Path(__file__).resolve().parent.parent / "info"
+WHOAMI_PHOTO_ID = "AgACAgQAAxkBAAIHImm3Ilp3SvfAFv8zY6EaW9gzvFT1AAJyDWsb5OS5UXEuXr4ixWKrAQADAgADdwADOgQ"
 
 
 def _request_keyboard() -> InlineKeyboardMarkup:
@@ -39,31 +50,60 @@ def _is_admin(db_user: User) -> bool:
     return role == UserRole.admin
 
 
+def _format_role(role: UserRole) -> str:
+    normalized_role = UserRole.basic if role == UserRole.user else role
+    return normalized_role.value
+
+
+def _start_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Ben Kimim?", callback_data="info_whoami"),
+                InlineKeyboardButton(
+                    text="Nasıl Çalışır?", callback_data="info_how_it_works"
+                ),
+            ],
+            [InlineKeyboardButton(text="İletişim", callback_data="info_contact")],
+        ]
+    )
+
+
+def _read_info_markdown(filename: str) -> str:
+    return (INFO_DIR / filename).read_text(encoding="utf-8").strip()
+
+
 @router.message(Command("start"))
 async def handle_start(message: Message, db_user: Optional[User] = None) -> None:
-    async with SessionFactory() as session:
-        admin_username = await get_first_admin_username(session)
-
-    admin_line = (
-        f"\nİletişim: @{admin_username}"
-        if admin_username
-        else ""
-    )
-    if db_user is not None and db_user.is_active:
-        await message.answer(
-            "Bot aktif.\n"
-            "Komutları kullanabilirsiniz.\n"
-            "YHT işlemleri için /yht yazın."
-        )
-        return
-
     await message.answer(
-        "TutunSabri botuna hoş geldiniz.\n"
-        "Bu botu kullanmak için yetkiniz olması gerekir.\n"
-        "İsterseniz aşağıdaki butondan yetki talebi gönderebilirsiniz."
-        f"{admin_line}",
-        reply_markup=_request_keyboard(),
+        _read_info_markdown("start.md"),
+        reply_markup=_start_keyboard(),
     )
+
+
+@router.callback_query(lambda query: query.data == "info_whoami")
+async def handle_info_whoami(query: CallbackQuery) -> None:
+    await query.answer()
+    if query.message is not None:
+        await query.message.answer(_read_info_markdown("whoami.md"))
+        await query.message.answer_photo(
+            WHOAMI_PHOTO_ID,
+            caption="Gerçekte ben",
+        )
+
+
+@router.callback_query(lambda query: query.data == "info_how_it_works")
+async def handle_info_how_it_works(query: CallbackQuery) -> None:
+    await query.answer()
+    if query.message is not None:
+        await query.message.answer(_read_info_markdown("howtowork.md"))
+
+
+@router.callback_query(lambda query: query.data == "info_contact")
+async def handle_info_contact(query: CallbackQuery) -> None:
+    await query.answer()
+    if query.message is not None:
+        await query.message.answer(_read_info_markdown("contact.md"))
 
 
 @router.callback_query(lambda query: query.data == "cancel_access")
@@ -87,9 +127,10 @@ async def handle_request_access(query: CallbackQuery) -> None:
         admin_users = await get_admin_users(session)
 
     username = f"@{from_user.username}" if from_user.username else "-"
-    full_name = " ".join(
-        part for part in [from_user.first_name, from_user.last_name] if part
-    ) or "-"
+    full_name = (
+        " ".join(part for part in [from_user.first_name, from_user.last_name] if part)
+        or "-"
+    )
     notify_text = (
         "*Yeni yetki talebi*\n"
         f"*Kullanıcı:* {username}\n"
@@ -128,11 +169,64 @@ async def handle_requests(message: Message, db_user: User) -> None:
     lines = ["*Bekleyen yetki talepleri*"]
     for item in requests:
         username = f"@{item.username}" if item.username else "-"
-        full_name = " ".join(part for part in [item.first_name, item.last_name] if part) or "-"
+        full_name = (
+            " ".join(part for part in [item.first_name, item.last_name] if part) or "-"
+        )
         lines.append(
             f"{username} | `{item.telegram_user_id}` | {full_name}\n"
             f"`/grant {item.telegram_user_id}`\n"
             f"`/revoke {item.telegram_user_id}`"
+        )
+    await message.answer("\n\n".join(lines))
+
+
+@router.message(Command("listusers"))
+async def handle_listusers(message: Message, db_user: User) -> None:
+    if not _is_admin(db_user):
+        await message.answer("Bu komutu kullanma yetkiniz yok.")
+        return
+    async with SessionFactory() as session:
+        users = await get_all_users(session)
+    if not users:
+        await message.answer("Kayıtlı kullanıcı bulunmuyor.")
+        return
+    lines = ["*Kullanıcı listesi*"]
+    for user in users:
+        username = f"@{user.username}" if user.username else "-"
+        status = "aktif" if user.is_active else "pasif"
+        full_name = " ".join(part for part in [user.first_name, user.last_name] if part) or "-"
+        lines.append(
+            f"{username} | `{user.telegram_user_id}`\n"
+            f"*Rol:* {_format_role(user.role)} | *Durum:* {status}\n"
+            f"*Ad Soyad:* {full_name}"
+        )
+    await message.answer("\n\n".join(lines))
+
+
+@router.message(Command("process"))
+async def handle_processes(message: Message, db_user: User) -> None:
+    if not _is_admin(db_user):
+        await message.answer("Bu komutu kullanma yetkiniz yok.")
+        return
+    async with SessionFactory() as session:
+        tasks = await get_all_open_tasks(session)
+        users_by_id = {}
+        for task in tasks:
+            if task.user_id not in users_by_id:
+                users_by_id[task.user_id] = await get_user_by_id(session, task.user_id)
+    if not tasks:
+        await message.answer("Aktif çalışan YHT görevi bulunmuyor.")
+        return
+    lines = ["*Aktif süreçler*"]
+    for task in tasks:
+        user = users_by_id.get(task.user_id)
+        username = f"@{user.username}" if user and user.username else "-"
+        lines.append(
+            f"*Görev:* `{task.task_id}`\n"
+            f"*Kullanıcı:* {username} (`{getattr(user, 'telegram_user_id', task.user_id)}`)\n"
+            f"*Durum:* {task.status.value}\n"
+            f"*Güzergâh:* {task.from_station} -> {task.to_station}\n"
+            f"*Kalkış:* {task.travel_date.isoformat()} {task.travel_hour}"
         )
     await message.answer("\n\n".join(lines))
 

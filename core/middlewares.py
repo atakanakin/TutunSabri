@@ -14,7 +14,13 @@ from core.repositories import get_first_admin_username, get_user_by_telegram_id,
 logger = logging.getLogger(__name__)
 
 PUBLIC_COMMANDS = {"start"}
-PUBLIC_CALLBACKS = {"request_access", "cancel_access"}
+PUBLIC_CALLBACKS = {
+    "request_access",
+    "cancel_access",
+    "info_whoami",
+    "info_how_it_works",
+    "info_contact",
+}
 
 
 class LoggingMiddleware(BaseMiddleware):
