@@ -27,6 +27,9 @@ from modules.yht.logic import TCDDClient, YHTError
 from modules.yht.config import yht_settings
 from modules.yht.utils import (
     build_choice_keyboard,
+    format_route_sentence,
+    format_turkish_date_short,
+    format_turkish_datetime_long,
     is_cancel_text,
     remove_choice_keyboard,
 )
@@ -45,22 +48,6 @@ class SearchStates(StatesGroup):
     travel_hour = State()
     cancel_task_choice = State()
     release_task_choice = State()
-
-
-MONTH_NAMES_TR = {
-    1: "Ocak",
-    2: "Şubat",
-    3: "Mart",
-    4: "Nisan",
-    5: "Mayıs",
-    6: "Haziran",
-    7: "Temmuz",
-    8: "Ağustos",
-    9: "Eylül",
-    10: "Ekim",
-    11: "Kasım",
-    12: "Aralık",
-}
 
 
 def _format_admin_release_error(task, user, error_text: str) -> str:
@@ -98,22 +85,16 @@ def _format_task_status(status: SearchTaskStatus) -> str:
 
 def _format_task_summary(task) -> str:
     return (
-        f"*Görev:* `{task.task_id}`\n"
         f"*Durum:* {_format_task_status(task.status)}\n"
-        f"*Güzergâh:* {task.from_station} -> {task.to_station}\n"
-        f"*Kalkış:* {_format_turkish_date(task.travel_date)} {task.travel_hour}"
+        f"*Güzergâh:* *{task.from_station} -> {task.to_station}*\n"
+        f"*Tarih:* *{format_turkish_datetime_long(task.travel_date, task.travel_hour)}*"
     )
-
-
-def _format_turkish_date(travel_date) -> str:
-    month_name = MONTH_NAMES_TR[travel_date.month]
-    return f"{travel_date.day} {month_name} {travel_date.strftime('%y')}"
 
 
 def _build_task_choice_label(task) -> str:
     return (
         f"{task.from_station} -> {task.to_station} | "
-        f"{_format_turkish_date(task.travel_date)} | {task.travel_hour}"
+        f"{format_turkish_date_short(task.travel_date)} | {task.travel_hour}"
     )
 
 
@@ -166,10 +147,10 @@ async def _release_held_task(message: Message, task, db_user: User) -> bool:
                 session,
                 task_id=task.task_id,
                 status=SearchTaskStatus.failed,
-                last_result="Tutulan koltuk bilgisi eksik olduğu için görev sonlandırıldı.",
+                last_result="missing hold details",
             )
         await message.answer(
-            "*Tutulan koltuk bilgisi eksik olduğu için görev sonlandırıldı.*",
+            "Tutulan koltuk bilgisi eksik olduğu için işlem sonlandırıldı.",
             reply_markup=remove_choice_keyboard(),
         )
         return False
@@ -183,7 +164,7 @@ async def _release_held_task(message: Message, task, db_user: User) -> bool:
         )
         if fresh_task is None:
             await message.answer(
-                "*Görev bulunamadı.*",
+                "İşlem kaydı bulunamadı.",
                 reply_markup=remove_choice_keyboard(),
             )
             return False
@@ -198,14 +179,14 @@ async def _release_held_task(message: Message, task, db_user: User) -> bool:
                 session,
                 task_id=fresh_task.task_id,
                 status=SearchTaskStatus.failed,
-                last_result=f"Koltuk bırakma sırasında hata: {exc}",
+                last_result=f"release failed: {exc}",
             )
             await _notify_admins(
                 message,
                 _format_admin_release_error(fresh_task, db_user, str(exc)),
             )
             await message.answer(
-                "*Tutulan koltuk artık aktif görünmüyor.*\nKayıt temizlendi.",
+                "Tutulan koltuk artık aktif görünmüyor. Kayıt temizlendi.",
                 reply_markup=remove_choice_keyboard(),
             )
             return False
@@ -213,7 +194,7 @@ async def _release_held_task(message: Message, task, db_user: User) -> bool:
             session,
             task_id=fresh_task.task_id,
             status=SearchTaskStatus.completed,
-            last_result="Held seat released by user.",
+            last_result="seat released by user",
         )
     return True
 
@@ -222,7 +203,9 @@ async def _release_held_task(message: Message, task, db_user: User) -> bool:
 async def handle_yht_start(message: Message, state: FSMContext, db_user: User) -> None:
     await state.set_state(SearchStates.from_station)
     await message.answer(
-        "Kalkış şehrini giriniz.\nBirden fazla eşleşme varsa seçim listesi gösterilecektir.\nİptal için `cancel` yazın."
+        "Kalkış şehrini yazınız.\n"
+        "Örnek: `ank`, `ankara`, `ANkara`\n"
+        "İptal etmek için `cancel` yazabilirsiniz."
     )
 
 
@@ -230,25 +213,27 @@ async def handle_yht_start(message: Message, state: FSMContext, db_user: User) -
 async def capture_from_station(message: Message, state: FSMContext) -> None:
     client = TCDDClient()
     if not message.text:
-        await message.answer("Kalkış istasyonunu metin olarak gönderin.")
+        await message.answer("Lütfen kalkış şehrini yazınız.")
         return
     if is_cancel_text(message.text):
         await state.clear()
         await message.answer(
-            "*İşlem iptal edildi.*", reply_markup=remove_choice_keyboard()
+            "İşlem iptal edildi.", reply_markup=remove_choice_keyboard()
         )
         return
     matches = await client.get_matching_stations(message.text.strip())
     if not matches:
         await message.answer(
-            "Geçerli bir kalkış yeri bulunamadı. Tekrar deneyin veya `cancel` yazın."
+            "Kalkış noktası bulunamadı. Lütfen tekrar deneyin ya da `cancel` yazın."
         )
         return
     if len(matches) == 1:
         await state.update_data(from_station=matches[0])
         await state.set_state(SearchStates.to_station)
         await message.answer(
-            "Varış şehrini giriniz.", reply_markup=remove_choice_keyboard()
+            "Varış şehrini yazınız.\n"
+            "Örnek: `ist`, `istanbul`, `Eskişehir`",
+            reply_markup=remove_choice_keyboard(),
         )
         return
     await state.update_data(from_station_options=matches)
@@ -267,7 +252,7 @@ async def capture_from_station_choice(message: Message, state: FSMContext) -> No
     if is_cancel_text(message.text):
         await state.clear()
         await message.answer(
-            "*İşlem iptal edildi.*", reply_markup=remove_choice_keyboard()
+            "İşlem iptal edildi.", reply_markup=remove_choice_keyboard()
         )
         return
     data = await state.get_data()
@@ -282,7 +267,9 @@ async def capture_from_station_choice(message: Message, state: FSMContext) -> No
     await state.update_data(from_station=selected, from_station_options=[])
     await state.set_state(SearchStates.to_station)
     await message.answer(
-        "Varış şehrini giriniz.", reply_markup=remove_choice_keyboard()
+        "Varış şehrini yazınız.\n"
+        "Örnek: `ist`, `istanbul`, `Eskişehir`",
+        reply_markup=remove_choice_keyboard(),
     )
 
 
@@ -290,25 +277,26 @@ async def capture_from_station_choice(message: Message, state: FSMContext) -> No
 async def capture_to_station(message: Message, state: FSMContext) -> None:
     client = TCDDClient()
     if not message.text:
-        await message.answer("Varış istasyonunu metin olarak gönderin.")
+        await message.answer("Lütfen varış şehrini yazınız.")
         return
     if is_cancel_text(message.text):
         await state.clear()
         await message.answer(
-            "*İşlem iptal edildi.*", reply_markup=remove_choice_keyboard()
+            "İşlem iptal edildi.", reply_markup=remove_choice_keyboard()
         )
         return
     matches = await client.get_matching_stations(message.text.strip())
     if not matches:
         await message.answer(
-            "Geçerli bir varış yeri bulunamadı. Tekrar deneyin veya `cancel` yazın."
+            "Varış noktası bulunamadı. Lütfen tekrar deneyin ya da `cancel` yazın."
         )
         return
     if len(matches) == 1:
         await state.update_data(to_station=matches[0])
         await state.set_state(SearchStates.travel_date)
         await message.answer(
-            "Tarih bilgisini *DD.MM.YYYY* formatında giriniz.",
+            "Tarihi yazınız.\n"
+            "Örnek: *16.03.2026*",
             reply_markup=remove_choice_keyboard(),
         )
         return
@@ -328,7 +316,7 @@ async def capture_to_station_choice(message: Message, state: FSMContext) -> None
     if is_cancel_text(message.text):
         await state.clear()
         await message.answer(
-            "*İşlem iptal edildi.*", reply_markup=remove_choice_keyboard()
+            "İşlem iptal edildi.", reply_markup=remove_choice_keyboard()
         )
         return
     data = await state.get_data()
@@ -343,7 +331,8 @@ async def capture_to_station_choice(message: Message, state: FSMContext) -> None
     await state.update_data(to_station=selected, to_station_options=[])
     await state.set_state(SearchStates.travel_date)
     await message.answer(
-        "Tarih bilgisini *DD.MM.YYYY* formatında giriniz.",
+        "Tarihi yazınız.\n"
+        "Örnek: *16.03.2026*",
         reply_markup=remove_choice_keyboard(),
     )
 
@@ -352,21 +341,23 @@ async def capture_to_station_choice(message: Message, state: FSMContext) -> None
 async def capture_travel_date(message: Message, state: FSMContext) -> None:
     client = TCDDClient()
     if not message.text:
-        await message.answer("Tarih bilgisini metin olarak gönderin.")
+        await message.answer("Lütfen tarihi yazınız.\nÖrnek: *16.03.2026*")
         return
     if is_cancel_text(message.text):
         await state.clear()
         await message.answer(
-            "*İşlem iptal edildi.*", reply_markup=remove_choice_keyboard()
+            "İşlem iptal edildi.", reply_markup=remove_choice_keyboard()
         )
         return
     try:
         travel_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
     except ValueError:
-        await message.answer("Geçersiz tarih. *DD.MM.YYYY* kullanın.")
+        await message.answer(
+            "Tarih formatı hatalı.\nLütfen *DD.MM.YYYY* formatında yazınız.\nÖrnek: *16.03.2026*"
+        )
         return
     if travel_date < datetime.now().date():
-        await message.answer("Geçmiş tarih seçilemez. Yeni bir tarih girin.")
+        await message.answer("Geçmiş bir tarih seçemezsiniz. Lütfen ileri bir tarih yazınız.")
         return
     data = await state.get_data()
     try:
@@ -376,12 +367,12 @@ async def capture_travel_date(message: Message, state: FSMContext) -> None:
             travel_date=travel_date,
         )
     except YHTError as exc:
-        await message.answer(str(exc), reply_markup=remove_choice_keyboard())
+        await message.answer(f"İşlem sırasında bir sorun oluştu: {exc}", reply_markup=remove_choice_keyboard())
         return
     if not hour_options:
         await state.clear()
         await message.answer(
-            "*Sefer bulunamadı.*\nBaşka bir tarih deneyin.",
+            "Bu tarih için uygun sefer bulunamadı. Lütfen başka bir tarih deneyin.",
             reply_markup=remove_choice_keyboard(),
         )
         return
@@ -391,7 +382,7 @@ async def capture_travel_date(message: Message, state: FSMContext) -> None:
     )
     await state.set_state(SearchStates.travel_hour)
     await message.answer(
-        "*Aşağıdaki saatlerden birini seçin:*",
+        "Saat seçiniz:",
         reply_markup=build_choice_keyboard(hour_options),
     )
 
@@ -401,12 +392,12 @@ async def capture_travel_hour(
     message: Message, state: FSMContext, db_user: User
 ) -> None:
     if not message.text:
-        await message.answer("Saat seçimi yapın.")
+        await message.answer("Lütfen bir saat seçiniz.")
         return
     if is_cancel_text(message.text):
         await state.clear()
         await message.answer(
-            "*İşlem iptal edildi.*", reply_markup=remove_choice_keyboard()
+            "İşlem iptal edildi.", reply_markup=remove_choice_keyboard()
         )
         return
     data = await state.get_data()
@@ -432,21 +423,14 @@ async def capture_travel_hour(
             await state.clear()
             if existing_task.status == SearchTaskStatus.seat_held:
                 await message.answer(
-                    "*Bu sefer için zaten açık bir göreviniz var.*\n"
-                    f"*Görev:* `{existing_task.task_id}`\n"
-                    f"*Güzergâh:* {existing_task.from_station} -> {existing_task.to_station}\n"
-                    f"*Kalkış:* {_format_turkish_date(existing_task.travel_date)} {existing_task.travel_hour}\n"
-                    f"*Bırakma:* `/yhtrelease {existing_task.task_id}`",
+                    f"{format_route_sentence(existing_task.from_station, existing_task.to_station, existing_task.travel_date, existing_task.travel_hour)} için zaten tutulmuş bir koltuk bulunuyor.\n"
+                    "Koltuk bırakmak isterseniz /yhtrelease kullanabilirsiniz.",
                     reply_markup=remove_choice_keyboard(),
                 )
                 return
             await message.answer(
-                "*Bu sefer için zaten çalışan bir YHT aramanız var.*\n"
-                f"*Görev:* `{existing_task.task_id}`\n"
-                f"*Güzergâh:* {existing_task.from_station} -> {existing_task.to_station}\n"
-                f"*Kalkış:* {_format_turkish_date(existing_task.travel_date)} {existing_task.travel_hour}\n"
-                f"*İptal:* `/yhtcancel {existing_task.task_id}`\n"
-                "*Görev listesi:* /yhtinfo",
+                f"{format_route_sentence(existing_task.from_station, existing_task.to_station, existing_task.travel_date, existing_task.travel_hour)} için zaten aktif bir arama bulunuyor.\n"
+                "Tüm işlemleriniz için /yhtinfo kullanabilirsiniz.",
                 reply_markup=remove_choice_keyboard(),
             )
             return
@@ -458,8 +442,8 @@ async def capture_travel_hour(
                 "*YHT görev limitinize ulaştınız.*\n"
                 f"*Rolünüz:* {_get_role_label(db_user.role)}\n"
                 f"*Açık görev limiti:* {parallel_task_limit}\n"
-                "Devam etmek için önce mevcut görevlerden birini iptal edin veya koltuk bırakın.\n"
-                "*Görev listesi:* /yhtinfo",
+                "Yeni bir arama başlatmadan önce açık işlemlerinizden birini sonlandırmanız gerekiyor.\n"
+                "Tüm işlemleriniz için /yhtinfo kullanabilirsiniz.",
                 reply_markup=remove_choice_keyboard(),
             )
             return
@@ -488,12 +472,8 @@ async def capture_travel_hour(
 
     await state.clear()
     await message.answer(
-        "*YHT araması başlatıldı.*\n"
-        f"*Görev:* `{task.task_id}`\n"
-        f"*Güzergâh:* {data['from_station']} -> {data['to_station']}\n"
-        f"*Kalkış:* {_format_turkish_date(datetime.fromisoformat(data['travel_date']).date())} {selected_hour}\n"
-        f"*İptal:* `/yhtcancel {task.task_id}`\n"
-        "*Görev listesi:* /yhtinfo",
+        f"{format_route_sentence(data['from_station'], data['to_station'], datetime.fromisoformat(data['travel_date']).date(), selected_hour)} için arama başlatıldı.\n"
+        "Tüm işlemleriniz için /yhtinfo kullanabilirsiniz.",
         reply_markup=remove_choice_keyboard(),
     )
 
@@ -510,7 +490,7 @@ async def handle_yht_cancel(
         open_tasks = await get_open_tasks_for_user(session, db_user.id)
         if not open_tasks:
             await message.answer(
-                "*Aktif YHT araması bulunamadı.*", reply_markup=remove_choice_keyboard()
+                "Aktif bir YHT araması bulunamadı.", reply_markup=remove_choice_keyboard()
             )
             return
 
@@ -526,11 +506,11 @@ async def handle_yht_cancel(
             ),
         )
         if task_arg and target_task is None:
-            await message.answer(
-                "*Geçerli bir aktif görev bulunamadı.*\nGörev listesi için /yhtinfo kullanın.",
-                reply_markup=remove_choice_keyboard(),
-            )
-            return
+                await message.answer(
+                    "Geçerli bir aktif işlem bulunamadı. Tüm işlemleriniz için /yhtinfo kullanabilirsiniz.",
+                    reply_markup=remove_choice_keyboard(),
+                )
+                return
         if target_task is None and len(open_tasks) == 1:
             target_task = open_tasks[0]
         elif target_task is None:
@@ -538,7 +518,7 @@ async def handle_yht_cancel(
             await state.update_data(cancel_task_options=options)
             await state.set_state(SearchStates.cancel_task_choice)
             await message.answer(
-                "*İptal etmek istediğiniz YHT görevini seçin:*",
+                "İptal etmek istediğiniz işlemi seçin:",
                 reply_markup=build_choice_keyboard(options.keys()),
             )
             return
@@ -548,14 +528,14 @@ async def handle_yht_cancel(
             if not released:
                 return
             await message.answer(
-                f"*Tutulan koltuk bırakıldı ve görev kapatıldı.*\n*Görev:* `{target_task.task_id}`",
+                "Tutulan koltuk bırakıldı ve işlem sonlandırıldı.",
                 reply_markup=remove_choice_keyboard(),
             )
             return
 
         await cancel_task(session, target_task.task_id)
     await message.answer(
-        f"*YHT araması iptal edildi.*\n*Görev:* `{target_task.task_id}`",
+        "YHT araması iptal edildi.",
         reply_markup=remove_choice_keyboard(),
     )
 
@@ -600,7 +580,7 @@ async def handle_yht_cancel_choice(
         if target_task is None:
             await state.clear()
             await message.answer(
-                "*Seçilen görev artık aktif değil.*",
+                "Seçtiğiniz işlem artık aktif değil.",
                 reply_markup=remove_choice_keyboard(),
             )
             return
@@ -610,14 +590,14 @@ async def handle_yht_cancel_choice(
             if not released:
                 return
             await message.answer(
-                f"*Tutulan koltuk bırakıldı ve görev kapatıldı.*\n*Görev:* `{target_task.task_id}`",
+                "Tutulan koltuk bırakıldı ve işlem sonlandırıldı.",
                 reply_markup=remove_choice_keyboard(),
             )
             return
         await cancel_task(session, target_task.task_id)
     await state.clear()
     await message.answer(
-        f"*YHT araması iptal edildi.*\n*Görev:* `{target_task.task_id}`",
+        "YHT araması iptal edildi.",
         reply_markup=remove_choice_keyboard(),
     )
 
@@ -634,7 +614,7 @@ async def handle_yht_release(
         held_tasks = await get_held_tasks_for_user(session, db_user.id)
         if not held_tasks:
             await message.answer(
-                "*Bırakılacak tutulmuş koltuk bulunamadı.*",
+                "Bırakılacak tutulmuş koltuk bulunamadı.",
                 reply_markup=remove_choice_keyboard(),
             )
             return
@@ -647,7 +627,7 @@ async def handle_yht_release(
         )
         if task_arg and held_task is None:
             await message.answer(
-                "*Belirtilen görevde tutulmuş koltuk bulunamadı.*\nGörev listesi için /yhtinfo kullanın.",
+                "Belirtilen işlemde tutulmuş koltuk bulunamadı. Tüm işlemleriniz için /yhtinfo kullanabilirsiniz.",
                 reply_markup=remove_choice_keyboard(),
             )
             return
@@ -658,14 +638,14 @@ async def handle_yht_release(
             await state.update_data(release_task_options=options)
             await state.set_state(SearchStates.release_task_choice)
             await message.answer(
-                "*Bırakmak istediğiniz tutulmuş koltuğu seçin:*",
+                "Bırakmak istediğiniz koltuğu seçin:",
                 reply_markup=build_choice_keyboard(options.keys()),
             )
             return
     released = await _release_held_task(message, held_task, db_user)
     if not released:
         return
-    await message.answer("*Tutulan koltuk bırakıldı.*", reply_markup=remove_choice_keyboard())
+    await message.answer("Tutulan koltuk bırakıldı.", reply_markup=remove_choice_keyboard())
 
 
 @router.message(SearchStates.release_task_choice)
@@ -704,7 +684,7 @@ async def handle_yht_release_choice(
         if held_task is None:
             await state.clear()
             await message.answer(
-                "*Seçilen görevde artık tutulmuş koltuk yok.*",
+                "Seçtiğiniz işlemde artık tutulmuş koltuk bulunmuyor.",
                 reply_markup=remove_choice_keyboard(),
             )
             return
@@ -713,7 +693,7 @@ async def handle_yht_release_choice(
     if not released:
         return
     await message.answer(
-        "*Tutulan koltuk bırakıldı.*",
+        "Tutulan koltuk bırakıldı.",
         reply_markup=remove_choice_keyboard(),
     )
 
@@ -723,17 +703,13 @@ async def handle_yht_info(message: Message, db_user: User) -> None:
     async with SessionFactory() as session:
         open_tasks = await get_open_tasks_for_user(session, db_user.id)
     if not open_tasks:
-        await message.answer("*Aktif veya tutulmuş YHT göreviniz yok.*")
+        await message.answer("Aktif ya da tutulmuş bir YHT işleminiz bulunmuyor.")
         return
 
-    lines = ["*Açık YHT görevleriniz*"]
+    lines = ["*Açık YHT işlemleriniz*"]
     for index, task in enumerate(open_tasks, start=1):
         lines.append(f"{index}.")
         lines.append(_format_task_summary(task))
-        if task.status == SearchTaskStatus.seat_held:
-            lines.append(f"*Bırakma:* `/yhtrelease {task.task_id}`")
-        else:
-            lines.append(f"*İptal:* `/yhtcancel {task.task_id}`")
         if task.last_result:
             lines.append(f"*Son durum:* {task.last_result}")
     await message.answer("\n".join(lines))

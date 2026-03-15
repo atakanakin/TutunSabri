@@ -21,6 +21,7 @@ from core.repositories import (
 )
 from modules.yht.config import yht_settings
 from modules.yht.logic import TCDDClient, YHTError
+from modules.yht.utils import format_route_sentence
 
 
 broker = ListQueueBroker(url=settings.redis_url)
@@ -54,40 +55,42 @@ async def _notify_admins(bot: Bot, text: str) -> None:
 
 
 def _economy_message(task, economy_count: int) -> str:
+    route_text = format_route_sentence(
+        task.from_station,
+        task.to_station,
+        task.travel_date,
+        task.travel_hour,
+    )
     if economy_count == 0:
-        return (
-            f"{task.from_station} -> {task.to_station} için {task.travel_hour} seferinde "
-            "*Ekonomi* vagonunda boş koltuk yok."
-        )
+        return f"{route_text} *ekonomi* sınıfında *boş koltuk bulunmamaktadır.*"
     return (
-        f"{task.from_station} -> {task.to_station} için {task.travel_hour} seferinde "
-        f"*Ekonomi* vagonunda *{economy_count}* boş koltuk var."
+        f"{route_text} *ekonomi* sınıfında *{economy_count}* boş koltuk bulunmaktadır."
     )
 
 
 def _business_message(task, business_count: int) -> str:
-    if business_count == 0:
-        return (
-            f"{task.from_station} -> {task.to_station} için {task.travel_hour} seferinde "
-            "*Business* vagonunda boş koltuk yok."
-        )
-    return (
-        f"{task.from_station} -> {task.to_station} için {task.travel_hour} seferinde "
-        f"*Business* vagonunda *{business_count}* boş koltuk var."
+    route_text = format_route_sentence(
+        task.from_station,
+        task.to_station,
+        task.travel_date,
+        task.travel_hour,
     )
+    if business_count == 0:
+        return f"{route_text} *business* sınıfında *boş koltuk bulunmamaktadır.*"
+    return f"{route_text} *business* sınıfında *{business_count}* boş koltuk bulunmaktadır."
 
 
 def _hold_message(task, hold_result: dict, hold_attempt_count: int) -> str:
+    route_text = format_route_sentence(
+        task.from_station,
+        task.to_station,
+        task.travel_date,
+        task.travel_hour,
+    )
     return (
-        "*Koltuk tutuldu.*\n"
-        f"*Güzergâh:* {task.from_station} -> {task.to_station}\n"
-        f"*Tarih:* {task.travel_date.isoformat()} {task.travel_hour}\n"
-        f"*Vagon:* {hold_result['wagon_number']}\n"
-        f"*Koltuk:* {hold_result['seat_number']}\n"
-        f"*Deneme:* {hold_attempt_count}/{yht_settings.max_hold_attempts}\n"
-        f"*Süre:* Koltuk {yht_settings.hold_duration_minutes} dakika tutulacaktır.\n"
-        f"*Manuel bırakma:* `/yhtrelease {task.task_id}`\n"
-        f"*Otomatik işlem:* Süre dolarsa sistem en fazla {yht_settings.max_hold_attempts} kez yeniden tutmayı deneyecek."
+        f"{route_text} için *{hold_result['wagon_number']}. vagonda {hold_result['seat_number']}* numaralı koltuk tutuldu.\n"
+        f"Koltuk *{yht_settings.hold_duration_minutes} dakika* boyunca sizin için tutulacaktır.\n"
+        "İsterseniz koltuğu /yhtrelease komutuyla hemen bırakabilirsiniz."
     )
 
 
@@ -114,7 +117,7 @@ async def monitor_yht_task(task_id: str) -> None:
                         session,
                         task_id=task_id,
                         status=SearchTaskStatus.failed,
-                        last_result="Görev sahibine ait kullanıcı kaydı bulunamadı.",
+                        last_result="user record missing",
                     )
                     return
 
@@ -124,7 +127,7 @@ async def monitor_yht_task(task_id: str) -> None:
                 if task.status == SearchTaskStatus.cancelled:
                     await bot.send_message(
                         user.telegram_user_id,
-                        "*YHT araması iptal edildi.*",
+                        "YHT araması iptal edildi.",
                     )
                     return
 
@@ -160,12 +163,11 @@ async def monitor_yht_task(task_id: str) -> None:
                                 session,
                                 task_id=task_id,
                                 status=SearchTaskStatus.completed,
-                                last_result="Koltuk tutma deneme limiti doldu.",
+                                last_result="hold retry limit reached",
                             )
                             await bot.send_message(
                                 user.telegram_user_id,
-                                "*Koltuk tutma süresi doldu ve yeniden deneme limiti tamamlandı.*\n"
-                                "Arama görevi kapatıldı.",
+                                "Tutulan koltuğun süresi doldu ve yeniden deneme sınırına ulaşıldı. İşlem sonlandırıldı.",
                             )
                             return
 
@@ -176,16 +178,11 @@ async def monitor_yht_task(task_id: str) -> None:
                         task.hold_expires_at = None
                         task.status = SearchTaskStatus.running
                         task.last_checked_at = now
-                        task.last_result = (
-                            f"Koltuk tutma süresi doldu. Yeniden deneme hazırlanıyor "
-                            f"({attempts}/{yht_settings.max_hold_attempts})."
-                        )
+                        task.last_result = f"hold expired, retrying ({attempts}/{yht_settings.max_hold_attempts})"
                         await session.commit()
                         await bot.send_message(
                             user.telegram_user_id,
-                            "*Tutulan koltuğun süresi doldu.*\n"
-                            f"Sistem yeniden koltuk tutmayı deneyecek "
-                            f"({attempts}/{yht_settings.max_hold_attempts}).",
+                            "Tutulan koltuğun süresi doldu. Sistem yeniden koltuk tutmayı deneyecek.",
                         )
                         task = await get_task_by_public_id(session, task_id)
                         if task is None:
@@ -198,7 +195,7 @@ async def monitor_yht_task(task_id: str) -> None:
                     session,
                     task_id=task_id,
                     status=SearchTaskStatus.running,
-                    last_result="TCDD uygunluk bilgisi kontrol ediliyor.",
+                    last_result="checking availability",
                 )
 
                 try:
@@ -213,48 +210,56 @@ async def monitor_yht_task(task_id: str) -> None:
                     await update_task_status(
                         session,
                         task_id=task_id,
-                        status=SearchTaskStatus.failed
-                        if error_count >= yht_settings.max_poll_errors
-                        else SearchTaskStatus.running,
-                        last_result=str(exc),
+                        status=(
+                            SearchTaskStatus.failed
+                            if error_count >= yht_settings.max_poll_errors
+                            else SearchTaskStatus.running
+                        ),
+                        last_result=f"tcdd error: {exc}",
                     )
                     if error_count >= yht_settings.max_poll_errors:
                         await bot.send_message(
                             user.telegram_user_id,
-                            "*YHT araması durduruldu.*\nLütfen daha sonra tekrar deneyin.",
+                            "YHT araması sırasında bir sorun oluştu. Lütfen daha sonra tekrar deneyin.",
                         )
-                        await _notify_admins(bot, _format_admin_error(task, user, str(exc)))
+                        await _notify_admins(
+                            bot, _format_admin_error(task, user, str(exc))
+                        )
                         return
                 except Exception as exc:
                     error_count += 1
                     await update_task_status(
                         session,
                         task_id=task_id,
-                        status=SearchTaskStatus.failed
-                        if error_count >= yht_settings.max_poll_errors
-                        else SearchTaskStatus.running,
-                        last_result=f"Beklenmeyen hata: {exc}",
+                        status=(
+                            SearchTaskStatus.failed
+                            if error_count >= yht_settings.max_poll_errors
+                            else SearchTaskStatus.running
+                        ),
+                        last_result=f"unexpected error: {exc}",
                     )
                     if error_count >= yht_settings.max_poll_errors:
                         await bot.send_message(
                             user.telegram_user_id,
-                            "*YHT aramasında bir hata oluştu.*\nLütfen daha sonra tekrar deneyin.",
+                            "YHT araması sırasında bir hata oluştu. Lütfen daha sonra tekrar deneyin.",
                         )
-                        await _notify_admins(bot, _format_admin_error(task, user, str(exc)))
+                        await _notify_admins(
+                            bot, _format_admin_error(task, user, str(exc))
+                        )
                         return
                 else:
                     error_count = 0
 
                     if availability is None:
                         previous_text = task.last_result or ""
-                        message = "Seçilen saat için tren bulunamadı."
+                        message = "Seçtiğiniz saat için tren bulunamadı."
                         await update_task_status(
                             session,
                             task_id=task_id,
                             status=SearchTaskStatus.running,
-                            last_result=message,
+                            last_result="train not found for selected departure",
                         )
-                        if previous_text != message:
+                        if previous_text != "train not found for selected departure":
                             await bot.send_message(user.telegram_user_id, message)
                     elif availability.economy_available > 0:
                         hold_result = await client.hold_seat(
@@ -290,8 +295,8 @@ async def monitor_yht_task(task_id: str) -> None:
                                 _business_message(task, availability.business_available)
                             )
                         snapshot_text = (
-                            f"Ekonomi={availability.economy_available}, "
-                            f"Business={availability.business_available}"
+                            f"economy={availability.economy_available}, "
+                            f"business={availability.business_available}"
                         )
                         await update_task_counts(
                             session,
@@ -301,7 +306,9 @@ async def monitor_yht_task(task_id: str) -> None:
                             last_result=snapshot_text,
                         )
                         for outgoing_message in outgoing_messages:
-                            await bot.send_message(user.telegram_user_id, outgoing_message)
+                            await bot.send_message(
+                                user.telegram_user_id, outgoing_message
+                            )
             await asyncio.sleep(sleep_seconds)
     finally:
         await bot.session.close()

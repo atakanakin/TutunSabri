@@ -32,6 +32,7 @@ from core.repositories import (
     revoke_user_access,
     update_user_role,
 )
+from modules.yht.utils import format_turkish_datetime_long
 
 
 router = Router(name="core")
@@ -377,7 +378,7 @@ async def handle_processes(message: Message, db_user: User) -> None:
             f"(<code>{getattr(user, 'telegram_user_id', task.user_id)}</code>)\n"
             f"<b>Durum:</b> {escape(task.status.value)}\n"
             f"<b>Güzergâh:</b> {escape(task.from_station)} -&gt; {escape(task.to_station)}\n"
-            f"<b>Kalkış:</b> {escape(task.travel_date.isoformat())} {escape(task.travel_hour)}"
+            f"<b>Kalkış:</b> {escape(format_turkish_datetime_long(task.travel_date, task.travel_hour))}"
         )
     await message.answer("\n\n".join(lines), parse_mode="HTML")
 
