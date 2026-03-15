@@ -1,0 +1,354 @@
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime, timezone
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.models import SearchTask, SearchTaskStatus, User, UserRole
+
+
+async def upsert_user(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+    username: Optional[str],
+    first_name: Optional[str],
+    last_name: Optional[str],
+) -> User:
+    result = await session.execute(
+        select(User).where(User.telegram_user_id == telegram_user_id),
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        user = User(
+            telegram_user_id=telegram_user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            role=UserRole.basic,
+            is_active=True,
+        )
+        session.add(user)
+    else:
+        user.username = username
+        user.first_name = first_name
+        user.last_name = last_name
+        if user.role == UserRole.user:
+            user.role = UserRole.basic
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def create_search_task(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    from_station: str,
+    to_station: str,
+    travel_date: date,
+    travel_hour: str,
+) -> SearchTask:
+    task = SearchTask(
+        task_id=str(uuid.uuid4()),
+        user_id=user_id,
+        from_station=from_station,
+        to_station=to_station,
+        travel_date=travel_date,
+        travel_hour=travel_hour,
+        status=SearchTaskStatus.pending,
+    )
+    session.add(task)
+    await session.commit()
+    await session.refresh(task)
+    return task
+
+
+async def get_active_task_for_user(
+    session: AsyncSession, user_id: int
+) -> Optional[SearchTask]:
+    result = await session.execute(
+        select(SearchTask)
+        .where(SearchTask.user_id == user_id)
+        .where(
+            SearchTask.status.in_(
+                [
+                    SearchTaskStatus.pending,
+                    SearchTaskStatus.running,
+                    SearchTaskStatus.seat_held,
+                ]
+            )
+        )
+        .order_by(SearchTask.created_at.desc()),
+    )
+    return result.scalars().first()
+
+
+async def get_held_task_for_user(
+    session: AsyncSession, user_id: int
+) -> Optional[SearchTask]:
+    result = await session.execute(
+        select(SearchTask)
+        .where(SearchTask.user_id == user_id)
+        .where(SearchTask.status == SearchTaskStatus.seat_held)
+        .order_by(SearchTask.created_at.desc()),
+    )
+    return result.scalars().first()
+
+
+async def get_open_tasks_for_user(
+    session: AsyncSession, user_id: int
+) -> list[SearchTask]:
+    result = await session.execute(
+        select(SearchTask)
+        .where(SearchTask.user_id == user_id)
+        .where(
+            SearchTask.status.in_(
+                [
+                    SearchTaskStatus.pending,
+                    SearchTaskStatus.running,
+                    SearchTaskStatus.seat_held,
+                ]
+            )
+        )
+        .order_by(SearchTask.created_at.desc()),
+    )
+    return list(result.scalars().all())
+
+
+async def get_held_tasks_for_user(
+    session: AsyncSession, user_id: int
+) -> list[SearchTask]:
+    result = await session.execute(
+        select(SearchTask)
+        .where(SearchTask.user_id == user_id)
+        .where(SearchTask.status == SearchTaskStatus.seat_held)
+        .order_by(SearchTask.created_at.desc()),
+    )
+    return list(result.scalars().all())
+
+
+async def get_task_by_public_id(
+    session: AsyncSession, task_id: str
+) -> Optional[SearchTask]:
+    result = await session.execute(
+        select(SearchTask).where(SearchTask.task_id == task_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_user_task_by_public_id(
+    session: AsyncSession, *, user_id: int, task_id: str
+) -> Optional[SearchTask]:
+    result = await session.execute(
+        select(SearchTask)
+        .where(SearchTask.user_id == user_id)
+        .where(SearchTask.task_id == task_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_open_task_by_signature(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    from_station: str,
+    to_station: str,
+    travel_date: date,
+    travel_hour: str,
+) -> Optional[SearchTask]:
+    result = await session.execute(
+        select(SearchTask)
+        .where(SearchTask.user_id == user_id)
+        .where(SearchTask.from_station == from_station)
+        .where(SearchTask.to_station == to_station)
+        .where(SearchTask.travel_date == travel_date)
+        .where(SearchTask.travel_hour == travel_hour)
+        .where(
+            SearchTask.status.in_(
+                [
+                    SearchTaskStatus.pending,
+                    SearchTaskStatus.running,
+                    SearchTaskStatus.seat_held,
+                ]
+            )
+        )
+        .order_by(SearchTask.created_at.desc()),
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
+    result = await session.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_telegram_id(
+    session: AsyncSession, telegram_user_id: int
+) -> Optional[User]:
+    result = await session.execute(
+        select(User).where(User.telegram_user_id == telegram_user_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_admin_users(session: AsyncSession) -> list[User]:
+    result = await session.execute(
+        select(User)
+        .where(User.role == UserRole.admin)
+        .where(User.is_active.is_(True))
+        .order_by(User.id.asc()),
+    )
+    return list(result.scalars().all())
+
+
+async def upsert_admin_user(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+    username: Optional[str],
+    first_name: Optional[str],
+    last_name: Optional[str],
+) -> User:
+    user = await get_user_by_telegram_id(session, telegram_user_id)
+    if user is None:
+        user = User(
+            telegram_user_id=telegram_user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            role=UserRole.admin,
+            is_active=True,
+        )
+        session.add(user)
+    else:
+        user.username = username
+        user.first_name = first_name
+        user.last_name = last_name
+        user.role = UserRole.admin
+        user.is_active = True
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def set_task_message_id(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    taskiq_message_id: str,
+) -> None:
+    task = await get_task_by_public_id(session, task_id)
+    if task is None:
+        return
+    task.taskiq_message_id = taskiq_message_id
+    await session.commit()
+
+
+async def update_task_status(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    status: SearchTaskStatus,
+    last_result: Optional[str] = None,
+) -> Optional[SearchTask]:
+    task = await get_task_by_public_id(session, task_id)
+    if task is None:
+        return None
+    task.status = status
+    task.last_checked_at = datetime.now(timezone.utc)
+    if last_result is not None:
+        task.last_result = last_result
+    if status == SearchTaskStatus.cancelled:
+        task.cancelled_at = datetime.now(timezone.utc)
+    if status in {SearchTaskStatus.completed, SearchTaskStatus.failed}:
+        task.completed_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(task)
+    return task
+
+
+async def set_task_hold_details(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    train_id: int,
+    train_car_id: int,
+    allocation_id: str,
+    seat_number: str,
+    last_result: str,
+) -> Optional[SearchTask]:
+    task = await get_task_by_public_id(session, task_id)
+    if task is None:
+        return None
+    task.train_id = train_id
+    task.train_car_id = train_car_id
+    task.allocation_id = allocation_id
+    task.seat_number = seat_number
+    task.status = SearchTaskStatus.seat_held
+    task.last_result = last_result
+    task.last_checked_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(task)
+    return task
+
+
+async def update_task_counts(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    economy_count: int,
+    business_count: int,
+    last_result: Optional[str] = None,
+) -> Optional[SearchTask]:
+    task = await get_task_by_public_id(session, task_id)
+    if task is None:
+        return None
+    task.last_economy_count = economy_count
+    task.last_business_count = business_count
+    task.last_checked_at = datetime.now(timezone.utc)
+    if last_result is not None:
+        task.last_result = last_result
+    await session.commit()
+    await session.refresh(task)
+    return task
+
+
+async def clear_task_hold_details(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    status: SearchTaskStatus,
+    last_result: str,
+) -> Optional[SearchTask]:
+    task = await get_task_by_public_id(session, task_id)
+    if task is None:
+        return None
+    task.train_id = None
+    task.train_car_id = None
+    task.allocation_id = None
+    task.seat_number = None
+    task.status = status
+    task.last_result = last_result
+    task.last_checked_at = datetime.now(timezone.utc)
+    if status in (
+        SearchTaskStatus.cancelled,
+        SearchTaskStatus.completed,
+        SearchTaskStatus.failed,
+    ):
+        task.completed_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(task)
+    return task
+
+
+async def cancel_task(session: AsyncSession, task_id: str) -> Optional[SearchTask]:
+    return await update_task_status(
+        session,
+        task_id=task_id,
+        status=SearchTaskStatus.cancelled,
+        last_result="Cancelled by user.",
+    )
