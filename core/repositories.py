@@ -222,6 +222,15 @@ async def get_all_users(session: AsyncSession) -> list[User]:
     return list(result.scalars().all())
 
 
+async def get_all_active_users(session: AsyncSession) -> list[User]:
+    result = await session.execute(
+        select(User)
+        .where(User.is_active.is_(True))
+        .order_by(User.created_at.asc(), User.id.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def get_first_admin_username(session: AsyncSession) -> Optional[str]:
     result = await session.execute(
         select(User.username)
@@ -230,7 +239,7 @@ async def get_first_admin_username(session: AsyncSession) -> Optional[str]:
         .where(User.username.is_not(None))
         .order_by(User.id.asc()),
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def get_admin_users(session: AsyncSession) -> list[User]:
@@ -378,6 +387,21 @@ async def revoke_user_access(
         access_request.status = AccessRequestStatus.rejected
         access_request.resolved_at = datetime.now(timezone.utc)
         access_request.is_notified = True
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def update_user_role(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+    role: UserRole,
+) -> Optional[User]:
+    user = await get_user_by_telegram_id(session, telegram_user_id)
+    if user is None:
+        return None
+    user.role = role
     await session.commit()
     await session.refresh(user)
     return user
