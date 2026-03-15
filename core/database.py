@@ -47,7 +47,7 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def init_database() -> None:
-    from core.models import SearchTask, User
+    from core.models import AccessRequest, SearchTask, User
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -60,6 +60,14 @@ async def _apply_sqlite_compatibility_migrations(connection: AsyncSession) -> No
 
     await _ensure_column(connection, "users", "role", "VARCHAR(16) DEFAULT 'basic'")
     await _ensure_column(connection, "users", "is_active", "BOOLEAN DEFAULT 1")
+    await _ensure_column(connection, "access_requests", "user_id", "INTEGER")
+    await _ensure_column(connection, "access_requests", "username", "VARCHAR(255)")
+    await _ensure_column(connection, "access_requests", "first_name", "VARCHAR(255)")
+    await _ensure_column(connection, "access_requests", "last_name", "VARCHAR(255)")
+    await _ensure_column(connection, "access_requests", "status", "VARCHAR(16) DEFAULT 'pending'")
+    await _ensure_column(connection, "access_requests", "is_notified", "BOOLEAN DEFAULT 0")
+    await _ensure_column(connection, "access_requests", "requested_at", "DATETIME")
+    await _ensure_column(connection, "access_requests", "resolved_at", "DATETIME")
     await _ensure_column(connection, "search_tasks", "train_id", "INTEGER")
     await _ensure_column(connection, "search_tasks", "train_car_id", "INTEGER")
     await _ensure_column(connection, "search_tasks", "allocation_id", "VARCHAR(64)")

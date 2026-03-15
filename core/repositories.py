@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import SearchTask, SearchTaskStatus, User, UserRole
+from core.models import AccessRequest, AccessRequestStatus
 from modules.yht.config import yht_settings
 
 
@@ -39,6 +40,24 @@ async def upsert_user(
         user.last_name = last_name
         if user.role == UserRole.user:
             user.role = UserRole.basic
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def sync_user_profile(
+    session: AsyncSession,
+    *,
+    user: User,
+    username: Optional[str],
+    first_name: Optional[str],
+    last_name: Optional[str],
+) -> User:
+    user.username = username
+    user.first_name = first_name
+    user.last_name = last_name
+    if user.role == UserRole.user:
+        user.role = UserRole.basic
     await session.commit()
     await session.refresh(user)
     return user
@@ -196,6 +215,17 @@ async def get_user_by_telegram_id(
     return result.scalar_one_or_none()
 
 
+async def get_first_admin_username(session: AsyncSession) -> Optional[str]:
+    result = await session.execute(
+        select(User.username)
+        .where(User.role == UserRole.admin)
+        .where(User.is_active.is_(True))
+        .where(User.username.is_not(None))
+        .order_by(User.id.asc()),
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_admin_users(session: AsyncSession) -> list[User]:
     result = await session.execute(
         select(User)
@@ -204,6 +234,148 @@ async def get_admin_users(session: AsyncSession) -> list[User]:
         .order_by(User.id.asc()),
     )
     return list(result.scalars().all())
+
+
+async def create_or_refresh_access_request(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+    username: Optional[str],
+    first_name: Optional[str],
+    last_name: Optional[str],
+) -> AccessRequest:
+    user = await get_user_by_telegram_id(session, telegram_user_id)
+    result = await session.execute(
+        select(AccessRequest).where(AccessRequest.telegram_user_id == telegram_user_id)
+    )
+    access_request = result.scalar_one_or_none()
+    if access_request is None:
+        access_request = AccessRequest(
+            telegram_user_id=telegram_user_id,
+            user_id=user.id if user else None,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            status=AccessRequestStatus.pending,
+            is_notified=False,
+        )
+        session.add(access_request)
+    else:
+        access_request.user_id = user.id if user else None
+        access_request.username = username
+        access_request.first_name = first_name
+        access_request.last_name = last_name
+        access_request.status = AccessRequestStatus.pending
+        access_request.is_notified = False
+        access_request.resolved_at = None
+    await session.commit()
+    await session.refresh(access_request)
+    return access_request
+
+
+async def mark_access_request_notified(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+) -> Optional[AccessRequest]:
+    result = await session.execute(
+        select(AccessRequest).where(AccessRequest.telegram_user_id == telegram_user_id)
+    )
+    access_request = result.scalar_one_or_none()
+    if access_request is None:
+        return None
+    access_request.is_notified = True
+    await session.commit()
+    await session.refresh(access_request)
+    return access_request
+
+
+async def get_pending_access_requests(session: AsyncSession) -> list[AccessRequest]:
+    result = await session.execute(
+        select(AccessRequest)
+        .where(AccessRequest.status == AccessRequestStatus.pending)
+        .order_by(AccessRequest.requested_at.asc()),
+    )
+    return list(result.scalars().all())
+
+
+async def approve_access_request(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+) -> Optional[User]:
+    result = await session.execute(
+        select(AccessRequest).where(AccessRequest.telegram_user_id == telegram_user_id)
+    )
+    access_request = result.scalar_one_or_none()
+    user = await get_user_by_telegram_id(session, telegram_user_id)
+    if user is None:
+        user = User(
+            telegram_user_id=telegram_user_id,
+            username=access_request.username if access_request else None,
+            first_name=access_request.first_name if access_request else None,
+            last_name=access_request.last_name if access_request else None,
+            role=UserRole.basic,
+            is_active=True,
+        )
+        session.add(user)
+        await session.flush()
+    else:
+        user.username = access_request.username if access_request else user.username
+        user.first_name = access_request.first_name if access_request else user.first_name
+        user.last_name = access_request.last_name if access_request else user.last_name
+        if user.role == UserRole.user:
+            user.role = UserRole.basic
+        user.is_active = True
+    if access_request is not None:
+        access_request.user_id = user.id
+        access_request.status = AccessRequestStatus.approved
+        access_request.is_notified = True
+        access_request.resolved_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def revoke_user_access(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+) -> Optional[User]:
+    user = await get_user_by_telegram_id(session, telegram_user_id)
+    if user is None:
+        return None
+    user.is_active = False
+    result = await session.execute(
+        select(AccessRequest).where(AccessRequest.telegram_user_id == telegram_user_id)
+    )
+    access_request = result.scalar_one_or_none()
+    if access_request is not None:
+        access_request.status = AccessRequestStatus.rejected
+        access_request.resolved_at = datetime.now(timezone.utc)
+        access_request.is_notified = True
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def reject_access_request(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+) -> Optional[AccessRequest]:
+    result = await session.execute(
+        select(AccessRequest).where(AccessRequest.telegram_user_id == telegram_user_id)
+    )
+    access_request = result.scalar_one_or_none()
+    if access_request is None:
+        return None
+    access_request.status = AccessRequestStatus.rejected
+    access_request.resolved_at = datetime.now(timezone.utc)
+    access_request.is_notified = True
+    await session.commit()
+    await session.refresh(access_request)
+    return access_request
 
 
 async def upsert_admin_user(

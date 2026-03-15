@@ -5,6 +5,7 @@ from enum import Enum
 from typing import List, Optional
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Enum as SqlEnum,
@@ -35,6 +36,12 @@ class SearchTaskStatus(str, Enum):
     failed = "failed"
 
 
+class AccessRequestStatus(str, Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -59,6 +66,7 @@ class User(Base):
     )
 
     search_tasks: Mapped[List["SearchTask"]] = relationship(back_populates="user")
+    access_requests: Mapped[List["AccessRequest"]] = relationship(back_populates="user")
 
 
 class SearchTask(Base):
@@ -111,3 +119,32 @@ class SearchTask(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="search_tasks")
+
+
+class AccessRequest(Base):
+    __tablename__ = "access_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_user_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    first_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[AccessRequestStatus] = mapped_column(
+        SqlEnum(AccessRequestStatus, native_enum=False),
+        default=AccessRequestStatus.pending,
+        index=True,
+    )
+    is_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    user: Mapped[Optional["User"]] = relationship(back_populates="access_requests")
