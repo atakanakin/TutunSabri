@@ -13,7 +13,7 @@ sudo apt install -y git curl redis-server python3 python3-venv python3-pip
 
 ```bash
 cd ~
-sudo git clone <YOUR_REPOSITORY_URL> tutunsabri
+sudo git clone https://github.com/atakanakin/TutunSabri.git tutunsabri
 sudo chown -R $USER:$USER ~/tutunsabri
 cd ~/tutunsabri
 ```
