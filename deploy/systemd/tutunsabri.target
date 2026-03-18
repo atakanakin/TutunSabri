@@ -1,0 +1,7 @@
+[Unit]
+Description=TutunSabri Application Stack
+Wants=tutunsabri-bot.service tutunsabri-worker.service
+After=redis-server.service network.target
+
+[Install]
+WantedBy=multi-user.target
