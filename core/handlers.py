@@ -107,6 +107,28 @@ def _admin_display_name(user: User) -> str:
     return user.first_name or "Yönetici"
 
 
+def _safe_value(value: Optional[object], fallback: str = "-") -> str:
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    return text or fallback
+
+
+def _safe_username(username: Optional[str]) -> str:
+    username_text = _safe_value(username)
+    if username_text == "-":
+        return username_text
+    if username_text.startswith("@"):
+        return username_text
+    return f"@{username_text}"
+
+
+def _safe_full_name(first_name: Optional[str], last_name: Optional[str]) -> str:
+    parts = [_safe_value(first_name, ""), _safe_value(last_name, "")]
+    full_name = " ".join(part for part in parts if part).strip()
+    return full_name or "-"
+
+
 def _build_media_caption(db_user: User, media_type: str, extra_html: str = "") -> str:
     admin_name = escape(_admin_display_name(db_user))
     base_map = {
@@ -327,18 +349,17 @@ async def handle_requests(message: Message, db_user: User) -> None:
     if not requests:
         await message.answer("Bekleyen yetki talebi bulunmuyor.")
         return
-    lines = ["*Bekleyen yetki talepleri*"]
+    lines = ["<b>Bekleyen yetki talepleri</b>"]
     for item in requests:
-        username = f"@{item.username}" if item.username else "-"
-        full_name = (
-            " ".join(part for part in [item.first_name, item.last_name] if part) or "-"
-        )
+        username = escape(_safe_username(item.username))
+        full_name = escape(_safe_full_name(item.first_name, item.last_name))
+        telegram_user_id = escape(_safe_value(item.telegram_user_id))
         lines.append(
-            f"{username} | `{item.telegram_user_id}` | {full_name}\n"
-            f"`/grant {item.telegram_user_id}`\n"
-            f"`/revoke {item.telegram_user_id}`"
+            f"{username} | <code>{telegram_user_id}</code> | {full_name}\n"
+            f"<code>/grant {telegram_user_id}</code>\n"
+            f"<code>/revoke {telegram_user_id}</code>"
         )
-    await message.answer("\n\n".join(lines))
+    await message.answer("\n\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("users"))
@@ -351,19 +372,19 @@ async def handle_users(message: Message, db_user: User) -> None:
     if not users:
         await message.answer("Kayıtlı kullanıcı bulunmuyor.")
         return
-    lines = ["*Kullanıcı listesi*"]
+    lines = ["<b>Kullanıcı listesi</b>"]
     for user in users:
-        username = f"@{user.username}" if user.username else "-"
+        username = escape(_safe_username(user.username))
         status = "aktif" if user.is_active else "pasif"
-        full_name = (
-            " ".join(part for part in [user.first_name, user.last_name] if part) or "-"
-        )
+        full_name = escape(_safe_full_name(user.first_name, user.last_name))
+        telegram_user_id = escape(_safe_value(user.telegram_user_id))
+        role = escape(_safe_value(_format_role(user.role)))
         lines.append(
-            f"{username} | `{user.telegram_user_id}`\n"
-            f"*Rol:* {_format_role(user.role)} | *Durum:* {status}\n"
-            f"*Ad Soyad:* {full_name}"
+            f"{username} | <code>{telegram_user_id}</code>\n"
+            f"<b>Rol:</b> {role} | <b>Durum:</b> {escape(status)}\n"
+            f"<b>Ad Soyad:</b> {full_name}"
         )
-    await message.answer("\n\n".join(lines))
+    await message.answer("\n\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("process"))
@@ -383,13 +404,13 @@ async def handle_processes(message: Message, db_user: User) -> None:
     lines = ["<b>Aktif süreçler</b>"]
     for task in tasks:
         user = users_by_id.get(task.user_id)
-        username = f"@{user.username}" if user and user.username else "-"
+        username = _safe_username(getattr(user, "username", None))
         lines.append(
             f"<b>Görev:</b> <code>{escape(task.task_id)}</code>\n"
             f"<b>Kullanıcı:</b> {escape(username)} "
-            f"(<code>{getattr(user, 'telegram_user_id', task.user_id)}</code>)\n"
+            f"(<code>{escape(_safe_value(getattr(user, 'telegram_user_id', task.user_id)))}</code>)\n"
             f"<b>Durum:</b> {escape(task.status.value)}\n"
-            f"<b>Güzergâh:</b> {escape(task.from_station)} -&gt; {escape(task.to_station)}\n"
+            f"<b>Güzergâh:</b> {escape(_safe_value(task.from_station))} -&gt; {escape(_safe_value(task.to_station))}\n"
             f"<b>Kalkış:</b> {escape(format_turkish_datetime_long(task.travel_date, task.travel_hour))}"
         )
     await message.answer("\n\n".join(lines), parse_mode="HTML")
