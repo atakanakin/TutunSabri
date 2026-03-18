@@ -232,6 +232,16 @@ async def handle_start(message: Message, db_user: Optional[User] = None) -> None
     )
 
 
+@router.message(Command("pedro"))
+async def handle_pedro(message: Message, db_user: User) -> None:
+    await message.answer_video(
+        "BAACAgQAAxkDAAIEI2YkHfk_t10R31SISqYxWk27VaDcAAJGEwACwmwgUZ6kBxvyfD_UNAQ",
+        supports_streaming=True,
+        width=1920,
+        height=1080,
+    )
+
+
 @router.callback_query(lambda query: query.data == "info_whoami")
 async def handle_info_whoami(query: CallbackQuery) -> None:
     await query.answer()
