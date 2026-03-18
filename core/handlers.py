@@ -246,7 +246,7 @@ async def _set_role_for_user(
         )
 
 
-@router.message(Command("start"))
+@router.message(Command(commands=["start", "help", "info"]))
 async def handle_start(message: Message, db_user: Optional[User] = None) -> None:
     await message.answer(
         _read_info_markdown("start.md"),
@@ -463,8 +463,8 @@ async def handle_broadcast_payload(
         await message.answer("Broadcast işlemi iptal edildi.")
         return
     if message.text:
-        sent_count = await _send_html_broadcast(message.bot, message.text)
         await state.clear()
+        sent_count = await _send_html_broadcast(message.bot, message.text)
         await message.answer(f"Broadcast gönderildi. Toplam alıcı: {sent_count}")
         return
 
@@ -520,13 +520,13 @@ async def handle_broadcast_skip_caption(
         await query.answer("Broadcast verisi bulunamadı.", show_alert=True)
         return
     caption_html = _build_media_caption(db_user, media_type)
+    await state.clear()
     sent_count = await _send_media_broadcast(
         query.bot,
         media_type=media_type,
         file_id=file_id,
         caption_html=caption_html,
     )
-    await state.clear()
     if query.message is not None:
         await query.message.edit_reply_markup(reply_markup=None)
         await query.message.answer(f"Broadcast gönderildi. Toplam alıcı: {sent_count}")
@@ -558,13 +558,13 @@ async def handle_broadcast_caption(
         await message.answer("Broadcast verisi bulunamadı.")
         return
     caption_html = _build_media_caption(db_user, media_type, message.text)
+    await state.clear()
     sent_count = await _send_media_broadcast(
         message.bot,
         media_type=media_type,
         file_id=file_id,
         caption_html=caption_html,
     )
-    await state.clear()
     await message.answer(f"Broadcast gönderildi. Toplam alıcı: {sent_count}")
 
 
