@@ -52,7 +52,7 @@ Create `.env` in the project root:
 
 ```bash
 cd ~/tutunsabri
-cp .example.env .env
+cp .env.example .env
 ```
 
 Fill out the BOT_TOKEN part
