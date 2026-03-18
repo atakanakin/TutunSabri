@@ -37,7 +37,7 @@ from modules.yht.utils import format_turkish_datetime_long
 
 router = Router(name="core")
 INFO_DIR = Path(__file__).resolve().parent.parent / "info"
-WHOAMI_PHOTO_ID = "AgACAgQAAxkBAAIHImm3Ilp3SvfAFv8zY6EaW9gzvFT1AAJyDWsb5OS5UXEuXr4ixWKrAQADAgADdwADOgQ"
+WHOAMI_PHOTO_ID = "AgACAgQAAxkBAAEBmO1puqJkukjL7wkCMy3c9ojTYBgjhgACvwxrG5X40VE1D6KSZ8KwFwEAAwIAA3cAAzoE"
 
 
 class BroadcastStates(StatesGroup):
@@ -355,7 +355,9 @@ async def handle_users(message: Message, db_user: User) -> None:
     for user in users:
         username = f"@{user.username}" if user.username else "-"
         status = "aktif" if user.is_active else "pasif"
-        full_name = " ".join(part for part in [user.first_name, user.last_name] if part) or "-"
+        full_name = (
+            " ".join(part for part in [user.first_name, user.last_name] if part) or "-"
+        )
         lines.append(
             f"{username} | `{user.telegram_user_id}`\n"
             f"*Rol:* {_format_role(user.role)} | *Durum:* {status}\n"
