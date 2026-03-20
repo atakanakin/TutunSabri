@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 from datetime import datetime, timezone
 from html import escape
 
@@ -55,6 +56,31 @@ async def _notify_admins(bot: Bot, text: str) -> None:
         await bot.send_message(admin_user.telegram_user_id, text, parse_mode="HTML")
 
 
+async def _fail_task_with_notifications(
+    bot: Bot,
+    *,
+    task_id: str,
+    user_id: int,
+    user_message: str,
+    last_result: str,
+    error_text: str,
+) -> None:
+    async with SessionFactory() as session:
+        task = await get_task_by_public_id(session, task_id)
+        user = await get_user_by_id(session, user_id)
+        if task is not None:
+            task = await update_task_status(
+                session,
+                task_id=task_id,
+                status=SearchTaskStatus.failed,
+                last_result=last_result,
+            )
+    if user is not None:
+        await bot.send_message(user.telegram_user_id, user_message)
+    if task is not None:
+        await _notify_admins(bot, _format_admin_error(task, user, error_text))
+
+
 def _economy_message(task, economy_count: int) -> str:
     route_text = format_route_sentence(
         task.from_station,
@@ -100,6 +126,7 @@ async def monitor_yht_task(task_id: str) -> None:
     client = TCDDClient()
     error_count = 0
     sleep_seconds = yht_settings.poll_interval_seconds
+    current_user_id = None
     bot = Bot(
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
@@ -114,6 +141,7 @@ async def monitor_yht_task(task_id: str) -> None:
                 if task is None:
                     return
                 user = await get_user_by_id(session, task.user_id)
+                current_user_id = task.user_id
                 if user is None:
                     await update_task_status(
                         session,
@@ -265,11 +293,25 @@ async def monitor_yht_task(task_id: str) -> None:
                         if previous_text != "train not found for selected departure":
                             await bot.send_message(user.telegram_user_id, message)
                     elif availability.economy_available > 0:
-                        hold_result = await client.hold_seat(
-                            train_id=availability.train_id,
-                            from_station=task.from_station,
-                            to_station=task.to_station,
-                        )
+                        try:
+                            hold_result = await client.hold_seat(
+                                train_id=availability.train_id,
+                                from_station=task.from_station,
+                                to_station=task.to_station,
+                            )
+                        except Exception as exc:
+                            await _fail_task_with_notifications(
+                                bot,
+                                task_id=task_id,
+                                user_id=task.user_id,
+                                user_message=(
+                                    "Koltuk tutma sırasında bir hata oluştu. "
+                                    "İşlem durduruldu."
+                                ),
+                                last_result="seat hold failed",
+                                error_text=traceback.format_exc(),
+                            )
+                            return
                         hold_attempt_count = (task.hold_attempt_count or 0) + 1
                         message = _hold_message(
                             task,
@@ -309,5 +351,19 @@ async def monitor_yht_task(task_id: str) -> None:
                                 user.telegram_user_id, outgoing_message
                             )
             await asyncio.sleep(sleep_seconds)
+    except Exception:
+        if current_user_id is not None:
+            await _fail_task_with_notifications(
+                bot,
+                task_id=task_id,
+                user_id=current_user_id,
+                user_message=(
+                    "YHT araması sırasında beklenmeyen bir hata oluştu. "
+                    "İşlem durduruldu."
+                ),
+                last_result="unexpected error",
+                error_text=traceback.format_exc(),
+            )
+        raise
     finally:
         await bot.session.close()
