@@ -125,6 +125,7 @@ def _hold_message(task, hold_result: dict, hold_attempt_count: int) -> str:
 async def monitor_yht_task(task_id: str) -> None:
     client = TCDDClient()
     error_count = 0
+    hold_error_count = 0
     sleep_seconds = yht_settings.poll_interval_seconds
     current_user_id = None
     bot = Bot(
@@ -293,25 +294,48 @@ async def monitor_yht_task(task_id: str) -> None:
                         if previous_text != "train not found for selected departure":
                             await bot.send_message(user.telegram_user_id, message)
                     elif availability.economy_available > 0:
-                        try:
-                            hold_result = await client.hold_seat(
-                                train_id=availability.train_id,
-                                from_station=task.from_station,
-                                to_station=task.to_station,
-                            )
-                        except Exception as exc:
-                            await _fail_task_with_notifications(
-                                bot,
+                        hold_result = None
+                        hold_error_trace = ""
+                        remaining_attempts = max(
+                            1,
+                            yht_settings.max_poll_errors - hold_error_count,
+                        )
+                        for attempt_index in range(remaining_attempts):
+                            try:
+                                hold_result = await client.hold_seat(
+                                    train_id=availability.train_id,
+                                    from_station=task.from_station,
+                                    to_station=task.to_station,
+                                )
+                                hold_error_count = 0
+                                break
+                            except Exception:
+                                hold_error_count += 1
+                                hold_error_trace = traceback.format_exc()
+                                if hold_error_count >= yht_settings.max_poll_errors:
+                                    await _fail_task_with_notifications(
+                                        bot,
+                                        task_id=task_id,
+                                        user_id=task.user_id,
+                                        user_message=(
+                                            "Koltuk tutma sırasında bir hata oluştu. "
+                                            "İşlem durduruldu."
+                                        ),
+                                        last_result="seat hold failed",
+                                        error_text=hold_error_trace,
+                                    )
+                                    return
+                                if attempt_index < remaining_attempts - 1:
+                                    await asyncio.sleep(2)
+                        if hold_result is None:
+                            await update_task_status(
+                                session,
                                 task_id=task_id,
-                                user_id=task.user_id,
-                                user_message=(
-                                    "Koltuk tutma sırasında bir hata oluştu. "
-                                    "İşlem durduruldu."
-                                ),
-                                last_result="seat hold failed",
-                                error_text=traceback.format_exc(),
+                                status=SearchTaskStatus.running,
+                                last_result="seat hold retrying",
                             )
-                            return
+                            sleep_seconds = 2
+                            continue
                         hold_attempt_count = (task.hold_attempt_count or 0) + 1
                         message = _hold_message(
                             task,

@@ -93,6 +93,7 @@ def format_last_result_text(last_result: str) -> str:
         "train not found for selected departure": "Seçilen saatte uygun tren bulunamadı.",
         "availability updated": "Son koltuk durumu güncellendi.",
         "seat held": "Koltuk tutuldu.",
+        "seat hold retrying": "Koltuk tutma yeniden deneniyor.",
         "seat released by user": "Koltuk kullanıcı tarafından bırakıldı.",
         "seat release failed": "Koltuk bırakılırken bir sorun oluştu.",
         "task cancelled by user": "İşlem kullanıcı tarafından iptal edildi.",
