@@ -10,8 +10,8 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/tutunsabri
 Environment=HOME=/home/ubuntu
-Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/env uv run python bot.py
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/tutunsabri/.venv/bin/python3 bot.py
 Restart=always
 RestartSec=5
 TimeoutStopSec=20
