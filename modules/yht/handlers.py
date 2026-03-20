@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from html import escape
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -28,6 +29,7 @@ from modules.yht.logic import TCDDClient, YHTError
 from modules.yht.config import yht_settings
 from modules.yht.utils import (
     build_choice_keyboard,
+    escape_markdown,
     format_last_result_text,
     format_route_sentence,
     format_turkish_date_short,
@@ -63,14 +65,14 @@ async def _send_delayed_support_message(message: Message) -> None:
 def _format_admin_release_error(task, user, error_text: str) -> str:
     username = f"@{user.username}" if user and user.username else "-"
     return (
-        "*YHT bırakma hatası*\n"
-        f"*Kullanıcı:* {username}\n"
-        f"*Telegram ID:* `{getattr(user, 'telegram_user_id', '-')}`\n"
-        f"*Görev:* `{task.task_id}`\n"
-        f"*Güzergâh:* {task.from_station} -> {task.to_station}\n"
-        f"*Tarih:* {task.travel_date.isoformat()} {task.travel_hour}\n"
-        f"*Koltuk:* {task.seat_number}\n"
-        f"*Hata:* `{error_text}`"
+        "<b>YHT bırakma hatası</b>\n"
+        f"<b>Kullanıcı:</b> {escape(username)}\n"
+        f"<b>Telegram ID:</b> <code>{escape(str(getattr(user, 'telegram_user_id', '-')))}</code>\n"
+        f"<b>Görev:</b> <code>{escape(task.task_id)}</code>\n"
+        f"<b>Güzergâh:</b> {escape(task.from_station)} -&gt; {escape(task.to_station)}\n"
+        f"<b>Tarih:</b> {escape(task.travel_date.isoformat())} {escape(task.travel_hour)}\n"
+        f"<b>Koltuk:</b> {escape(str(task.seat_number))}\n"
+        f"<b>Hata:</b> <code>{escape(error_text)}</code>"
     )
 
 
@@ -78,7 +80,11 @@ async def _notify_admins(message: Message, text: str) -> None:
     async with SessionFactory() as session:
         admin_users = await get_admin_users(session)
     for admin_user in admin_users:
-        await message.bot.send_message(admin_user.telegram_user_id, text)
+        await message.bot.send_message(
+            admin_user.telegram_user_id,
+            text,
+            parse_mode="HTML",
+        )
 
 
 def _format_task_status(status: SearchTaskStatus) -> str:
@@ -96,7 +102,7 @@ def _format_task_status(status: SearchTaskStatus) -> str:
 def _format_task_summary(task) -> str:
     return (
         f"*Durum:* {_format_task_status(task.status)}\n"
-        f"*Güzergâh:* *{task.from_station} -> {task.to_station}*\n"
+        f"*Güzergâh:* *{escape_markdown(task.from_station)} -> {escape_markdown(task.to_station)}*\n"
         f"*Tarih:* *{format_turkish_datetime_long(task.travel_date, task.travel_hour)}*"
     )
 
@@ -756,7 +762,7 @@ async def handle_trending(message: Message) -> None:
         await message.answer("*Henüz güzergâh istatistiği yok.*")
         return
     formatted = "\n".join(
-        f"{index}. {item['from_station']} -> {item['to_station']} ({item['search_count']})"
+        f"{index}. {escape_markdown(item['from_station'])} -> {escape_markdown(item['to_station'])} ({item['search_count']})"
         for index, item in enumerate(routes, start=1)
     )
     await message.answer(f"*Popüler güzergâhlar*\n{formatted}")

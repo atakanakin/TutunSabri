@@ -309,22 +309,24 @@ async def handle_request_access(query: CallbackQuery) -> None:
         )
         admin_users = await get_admin_users(session)
 
-    username = f"@{from_user.username}" if from_user.username else "-"
-    full_name = (
-        " ".join(part for part in [from_user.first_name, from_user.last_name] if part)
-        or "-"
-    )
+    username = escape(_safe_username(from_user.username))
+    full_name = escape(_safe_full_name(from_user.first_name, from_user.last_name))
+    telegram_user_id = escape(_safe_value(from_user.id))
     notify_text = (
-        "*Yeni yetki talebi*\n"
-        f"*Kullanıcı:* {username}\n"
-        f"*Telegram ID:* `{from_user.id}`\n"
-        f"*Ad Soyad:* {full_name}\n"
-        + f"*Onay:* `/grant {from_user.id}`\n"
-        + f"*Reddet / Kapat:* `/revoke {from_user.id}`"
+        "<b>Yeni yetki talebi</b>\n"
+        f"<b>Kullanıcı:</b> {username}\n"
+        f"<b>Telegram ID:</b> <code>{telegram_user_id}</code>\n"
+        f"<b>Ad Soyad:</b> {full_name}\n"
+        f"<b>Onay:</b> <code>/grant {telegram_user_id}</code>\n"
+        f"<b>Reddet / Kapat:</b> <code>/revoke {telegram_user_id}</code>"
     )
     if not access_request.is_notified:
         for admin_user in admin_users:
-            await query.bot.send_message(admin_user.telegram_user_id, notify_text)
+            await query.bot.send_message(
+                admin_user.telegram_user_id,
+                notify_text,
+                parse_mode="HTML",
+            )
         async with SessionFactory() as session:
             await mark_access_request_notified(
                 session,

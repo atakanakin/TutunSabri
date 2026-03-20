@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from html import escape
 
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
@@ -36,14 +37,14 @@ async def startup() -> None:
 def _format_admin_error(task, user, error_text: str) -> str:
     username = f"@{user.username}" if user and user.username else "-"
     return (
-        "*YHT hata bildirimi*\n"
-        f"*Kullanıcı:* {username}\n"
-        f"*Telegram ID:* `{getattr(user, 'telegram_user_id', '-')}`\n"
-        f"*Görev:* `{task.task_id}`\n"
-        f"*Güzergâh:* {task.from_station} -> {task.to_station}\n"
-        f"*Tarih:* {task.travel_date.isoformat()} {task.travel_hour}\n"
-        f"*Durum:* {task.status.value}\n"
-        f"*Hata:* `{error_text}`"
+        "<b>YHT hata bildirimi</b>\n"
+        f"<b>Kullanıcı:</b> {escape(username)}\n"
+        f"<b>Telegram ID:</b> <code>{escape(str(getattr(user, 'telegram_user_id', '-')))}</code>\n"
+        f"<b>Görev:</b> <code>{escape(task.task_id)}</code>\n"
+        f"<b>Güzergâh:</b> {escape(task.from_station)} -&gt; {escape(task.to_station)}\n"
+        f"<b>Tarih:</b> {escape(task.travel_date.isoformat())} {escape(task.travel_hour)}\n"
+        f"<b>Durum:</b> {escape(task.status.value)}\n"
+        f"<b>Hata:</b> <code>{escape(error_text)}</code>"
     )
 
 
@@ -51,7 +52,7 @@ async def _notify_admins(bot: Bot, text: str) -> None:
     async with SessionFactory() as session:
         admin_users = await get_admin_users(session)
     for admin_user in admin_users:
-        await bot.send_message(admin_user.telegram_user_id, text)
+        await bot.send_message(admin_user.telegram_user_id, text, parse_mode="HTML")
 
 
 def _economy_message(task, economy_count: int) -> str:

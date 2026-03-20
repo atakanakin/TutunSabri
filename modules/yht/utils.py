@@ -21,6 +21,8 @@ MONTH_NAMES_TR = {
     12: "Aralık",
 }
 
+MARKDOWN_SPECIAL_CHARS = r"_*[]()~`>#+-=|{}.!"
+
 
 def normalize_text(text: str) -> str:
     normalized = text.replace("I", "ı").replace("İ", "i")
@@ -54,6 +56,13 @@ def is_cancel_text(text: str) -> bool:
     return text.strip().lower() == "cancel"
 
 
+def escape_markdown(text: str) -> str:
+    escaped = str(text)
+    for char in MARKDOWN_SPECIAL_CHARS:
+        escaped = escaped.replace(char, f"\\{char}")
+    return escaped
+
+
 def format_turkish_date_short(value: date) -> str:
     return f"{value.day} {MONTH_NAMES_TR[value.month]} {value.strftime('%y')}"
 
@@ -69,7 +78,7 @@ def format_route_sentence(
     travel_hour: str,
 ) -> str:
     return (
-        f"*{from_station} -> {to_station}* güzergâhında "
+        f"*{escape_markdown(from_station)} -> {escape_markdown(to_station)}* güzergâhında "
         f"*{format_turkish_datetime_long(travel_date, travel_hour)}* tarihli trende"
     )
 
