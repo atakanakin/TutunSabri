@@ -21,7 +21,7 @@ MONTH_NAMES_TR = {
     12: "Aralık",
 }
 
-MARKDOWN_SPECIAL_CHARS = r"_*[]()~`>#+-=|{}.!"
+MARKDOWN_SPECIAL_CHARS = r"_*`["
 
 
 def normalize_text(text: str) -> str:
