@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Optional
 
 from aiogram import Router
+from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from aiogram.filters import Command
+from aiogram.filters.state import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -143,18 +145,47 @@ def _build_media_caption(db_user: User, media_type: str, extra_html: str = "") -
     return base_text
 
 
-async def _send_html_broadcast(bot, html_text: str) -> int:
+def _format_broadcast_delivery_error(user: User, error_text: str) -> str:
+    username = escape(_safe_username(user.username))
+    full_name = escape(_safe_full_name(user.first_name, user.last_name))
+    telegram_user_id = escape(_safe_value(user.telegram_user_id))
+    return (
+        "<b>Broadcast teslim hatası</b>\n"
+        f"<b>Kullanıcı:</b> {username}\n"
+        f"<b>Telegram ID:</b> <code>{telegram_user_id}</code>\n"
+        f"<b>Ad Soyad:</b> {full_name}\n"
+        f"<b>Hata:</b> <code>{escape(error_text)}</code>"
+    )
+
+
+async def _notify_admins(bot, html_text: str) -> None:
     async with SessionFactory() as session:
-        users = await get_all_active_users(session)
-    sent_count = 0
-    for user in users:
+        admin_users = await get_admin_users(session)
+    for admin_user in admin_users:
         await bot.send_message(
-            user.telegram_user_id,
+            admin_user.telegram_user_id,
             html_text,
             parse_mode="HTML",
         )
-        sent_count += 1
-    return sent_count
+
+
+async def _send_html_broadcast(bot, html_text: str) -> tuple[int, int]:
+    async with SessionFactory() as session:
+        users = await get_all_active_users(session)
+    sent_count = 0
+    failed_count = 0
+    for user in users:
+        try:
+            await bot.send_message(
+                user.telegram_user_id,
+                html_text,
+                parse_mode="HTML",
+            )
+            sent_count += 1
+        except (TelegramForbiddenError, TelegramAPIError) as exc:
+            failed_count += 1
+            await _notify_admins(bot, _format_broadcast_delivery_error(user, str(exc)))
+    return sent_count, failed_count
 
 
 async def _send_media_broadcast(
@@ -163,42 +194,47 @@ async def _send_media_broadcast(
     media_type: str,
     file_id: str,
     caption_html: str,
-) -> int:
+) -> tuple[int, int]:
     async with SessionFactory() as session:
         users = await get_all_active_users(session)
     sent_count = 0
+    failed_count = 0
     for user in users:
-        if media_type == "photo":
-            await bot.send_photo(
-                user.telegram_user_id,
-                file_id,
-                caption=caption_html,
-                parse_mode="HTML",
-            )
-        elif media_type == "video":
-            await bot.send_video(
-                user.telegram_user_id,
-                file_id,
-                caption=caption_html,
-                parse_mode="HTML",
-                supports_streaming=True,
-            )
-        elif media_type == "audio":
-            await bot.send_audio(
-                user.telegram_user_id,
-                file_id,
-                caption=caption_html,
-                parse_mode="HTML",
-            )
-        elif media_type == "document":
-            await bot.send_document(
-                user.telegram_user_id,
-                file_id,
-                caption=caption_html,
-                parse_mode="HTML",
-            )
-        sent_count += 1
-    return sent_count
+        try:
+            if media_type == "photo":
+                await bot.send_photo(
+                    user.telegram_user_id,
+                    file_id,
+                    caption=caption_html,
+                    parse_mode="HTML",
+                )
+            elif media_type == "video":
+                await bot.send_video(
+                    user.telegram_user_id,
+                    file_id,
+                    caption=caption_html,
+                    parse_mode="HTML",
+                    supports_streaming=True,
+                )
+            elif media_type == "audio":
+                await bot.send_audio(
+                    user.telegram_user_id,
+                    file_id,
+                    caption=caption_html,
+                    parse_mode="HTML",
+                )
+            elif media_type == "document":
+                await bot.send_document(
+                    user.telegram_user_id,
+                    file_id,
+                    caption=caption_html,
+                    parse_mode="HTML",
+                )
+            sent_count += 1
+        except (TelegramForbiddenError, TelegramAPIError) as exc:
+            failed_count += 1
+            await _notify_admins(bot, _format_broadcast_delivery_error(user, str(exc)))
+    return sent_count, failed_count
 
 
 def _extract_broadcast_media(message: Message) -> tuple[Optional[str], Optional[str]]:
@@ -466,8 +502,10 @@ async def handle_broadcast_payload(
         return
     if message.text:
         await state.clear()
-        sent_count = await _send_html_broadcast(message.bot, message.text)
-        await message.answer(f"Broadcast gönderildi. Toplam alıcı: {sent_count}")
+        sent_count, failed_count = await _send_html_broadcast(message.bot, message.text)
+        await message.answer(
+            f"Broadcast gönderildi. Başarılı: {sent_count} | Başarısız: {failed_count}"
+        )
         return
 
     media_type, file_id = _extract_broadcast_media(message)
@@ -523,7 +561,7 @@ async def handle_broadcast_skip_caption(
         return
     caption_html = _build_media_caption(db_user, media_type)
     await state.clear()
-    sent_count = await _send_media_broadcast(
+    sent_count, failed_count = await _send_media_broadcast(
         query.bot,
         media_type=media_type,
         file_id=file_id,
@@ -531,7 +569,9 @@ async def handle_broadcast_skip_caption(
     )
     if query.message is not None:
         await query.message.edit_reply_markup(reply_markup=None)
-        await query.message.answer(f"Broadcast gönderildi. Toplam alıcı: {sent_count}")
+        await query.message.answer(
+            f"Broadcast gönderildi. Başarılı: {sent_count} | Başarısız: {failed_count}"
+        )
     await query.answer()
 
 
@@ -561,13 +601,15 @@ async def handle_broadcast_caption(
         return
     caption_html = _build_media_caption(db_user, media_type, message.text)
     await state.clear()
-    sent_count = await _send_media_broadcast(
+    sent_count, failed_count = await _send_media_broadcast(
         message.bot,
         media_type=media_type,
         file_id=file_id,
         caption_html=caption_html,
     )
-    await message.answer(f"Broadcast gönderildi. Toplam alıcı: {sent_count}")
+    await message.answer(
+        f"Broadcast gönderildi. Başarılı: {sent_count} | Başarısız: {failed_count}"
+    )
 
 
 @router.message(Command("grant"))
