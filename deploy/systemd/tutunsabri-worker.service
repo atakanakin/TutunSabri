@@ -1,0 +1,20 @@
+[Unit]
+Description=TutunSabri Taskiq Worker
+After=network.target redis-server.service
+Requires=redis-server.service
+PartOf=tutunsabri.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/tutunsabri
+Environment=HOME=/home/ubuntu
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/tutunsabri/.venv/bin/taskiq worker --workers 1 tasks.worker:broker
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=tutunsabri.target

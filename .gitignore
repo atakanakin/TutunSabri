@@ -1,4 +1,15 @@
-conff.json
-__pycache__
-station_dict.json
-bot.log
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# secrets
+.env
+
+# Virtual environments
+.venv
+
+.DS_Store
