@@ -46,12 +46,16 @@ class TCDDClient:
             "Connection": "keep-alive",
             "Content-Type": "application/json",
             "Origin": "https://ebilet.tcddtasimacilik.gov.tr",
+            "Referer": "https://ebilet.tcddtasimacilik.gov.tr/",
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-site",
+            "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"macOS"',
             "User-Agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15"
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
             ),
             "unit-id": yht_settings.unit_id,
         }
