@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-import httpx
+from curl_cffi.requests import AsyncSession
 
 from modules.yht.config import yht_settings
 from modules.yht.utils import normalize_text
@@ -35,38 +35,36 @@ class TCDDClient:
         self._timezone = ZoneInfo(yht_settings.default_timezone)
         self._station_cache_path = Path(yht_settings.station_cache_path)
         self._station_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self._session = AsyncSession(impersonate="chrome131", timeout=30)
 
     @property
-    def headers(self) -> dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         return {
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "tr",
+            "sec-ch-ua-platform": '"macOS"',
             "Authorization": yht_settings.authorization,
-            "Connection": "keep-alive",
-            "Content-Type": "application/json",
-            "Origin": "https://ebilet.tcddtasimacilik.gov.tr",
-            "Referer": "https://ebilet.tcddtasimacilik.gov.tr/",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site",
+            "Accept-Language": "tr",
             "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
             "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"macOS"',
+            "unit-id": yht_settings.unit_id,
             "User-Agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
             ),
-            "unit-id": yht_settings.unit_id,
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Origin": "https://ebilet.tcddtasimacilik.gov.tr",
+            "Sec-Fetch-Site": "same-site",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
         }
 
-    async def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(headers=self.headers, timeout=30.0)
+    async def close(self) -> None:
+        await self._session.close()
 
     async def refresh_station_cache(self) -> dict[str, int]:
-        async with await self._client() as client:
-            response = await client.get(yht_settings.station_base_url)
-            self._raise_for_tcdd(response)
+        response = await self._session.get(yht_settings.station_base_url, headers=self._headers)
+        self._raise_for_tcdd(response)
         payload = response.json()
         station_map = {}
         city_map = {}
@@ -167,17 +165,20 @@ class TCDDClient:
             "searchRoutes": [
                 {
                     "departureStationId": departure_station_id,
+                    "departureStationName": from_station,
                     "arrivalStationId": arrival_station_id,
+                    "arrivalStationName": to_station,
                     "departureDate": f"{travel_date.strftime('%d-%m-%Y')} 00:00:00",
                 }
             ],
             "passengerTypeCounts": [{"id": 0, "count": 1}],
             "searchReservation": False,
+            "searchType": "DOMESTIC",
+            "blTrainTypes": ["TURISTIK_TREN"],
         }
         url = f"{yht_settings.api_base_url}/train/train-availability?environment=dev&userId=1"
-        async with await self._client() as client:
-            response = await client.post(url, json=payload)
-            self._raise_for_tcdd(response)
+        response = await self._session.post(url, json=payload, headers=self._headers)
+        self._raise_for_tcdd(response)
         data = response.json()
         availabilities: list[TrainAvailability] = []
         for item in data.get("trainLegs", [{}])[0].get("trainAvailabilities", []):
@@ -230,9 +231,8 @@ class TCDDClient:
         seat_map_url = (
             f"{yht_settings.api_base_url}/seat-maps/load-by-train-id?environment=dev&userId=1"
         )
-        async with await self._client() as client:
-            response = await client.post(seat_map_url, json=payload)
-            self._raise_for_tcdd(response)
+        response = await self._session.post(seat_map_url, json=payload, headers=self._headers)
+        self._raise_for_tcdd(response)
         wagon = self._select_wagon_with_empty_seat(response.json().get("seatMaps", []))
         if wagon is None:
             raise YHTError("Seat availability changed before hold operation completed.")
@@ -250,9 +250,8 @@ class TCDDClient:
         reserve_url = (
             f"{yht_settings.api_base_url}/inventory/select-seat?environment=dev&userId=1"
         )
-        async with await self._client() as client:
-            response = await client.post(reserve_url, json=reserve_payload)
-            self._raise_for_tcdd(response)
+        response = await self._session.post(reserve_url, json=reserve_payload, headers=self._headers)
+        self._raise_for_tcdd(response)
         reserve_data = response.json()
         return {
             "train_id": train_id,
@@ -275,9 +274,8 @@ class TCDDClient:
             "seatNumber": seat_number,
         }
         url = f"{yht_settings.api_base_url}/inventory/release-seat?environment=dev&userId=1"
-        async with await self._client() as client:
-            response = await client.post(url, json=payload)
-            self._raise_for_tcdd(response)
+        response = await self._session.post(url, json=payload, headers=self._headers)
+        self._raise_for_tcdd(response)
 
     async def check_specific_departure(
         self,
@@ -348,10 +346,8 @@ class TCDDClient:
                 }
         return None
 
-    def _raise_for_tcdd(self, response: httpx.Response) -> None:
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
+    def _raise_for_tcdd(self, response) -> None:
+        if response.status_code >= 400:
             raise YHTError(
                 f"TCDD isteği başarısız oldu. HTTP durum kodu: {response.status_code}"
-            ) from exc
+            )

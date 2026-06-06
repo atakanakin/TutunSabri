@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import traceback
 from datetime import datetime, timezone
 from html import escape
@@ -135,7 +136,7 @@ async def monitor_yht_task(task_id: str) -> None:
 
     try:
         while True:
-            sleep_seconds = yht_settings.poll_interval_seconds
+            sleep_seconds = yht_settings.poll_interval_seconds * random.uniform(0.75, 1.25)
             now = datetime.now(timezone.utc)
             async with SessionFactory() as session:
                 task = await get_task_by_public_id(session, task_id)
@@ -390,4 +391,5 @@ async def monitor_yht_task(task_id: str) -> None:
             )
         raise
     finally:
+        await client.close()
         await bot.session.close()
