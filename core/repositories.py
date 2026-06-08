@@ -575,6 +575,21 @@ async def clear_task_hold_details(
     return task
 
 
+async def set_user_yht_active(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+    is_active: bool,
+) -> Optional[User]:
+    user = await get_user_by_telegram_id(session, telegram_user_id)
+    if user is None:
+        return None
+    user.is_yht_active = is_active
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
 async def cancel_task(session: AsyncSession, task_id: str) -> Optional[SearchTask]:
     return await update_task_status(
         session,
