@@ -45,21 +45,6 @@ tutunsabri
 
 All configuration is done through environment variables (or a `.env` file).
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | Yes | — | Bot token from @BotFather |
-| `TCDD_AUTHORIZATION` | Yes | — | Bearer token for the API |
-| `DATABASE_URL` | No | `sqlite+aiosqlite:///./data/app.db` | SQLAlchemy database URL |
-| `REDIS_URL` | No | `redis://localhost:6379/0` | Redis connection URL |
-| `TCDD_API_BASE_URL` | No | — | API base URL |
-| `POLL_INTERVAL_SECONDS` | No | `30` | How often each task polls for availability |
-| `MAX_POLL_ERRORS` | No | `3` | Consecutive errors before a task is marked failed |
-| `YHT_HOLD_DURATION_MINUTES` | No | `10` | How long a held seat is kept before being released |
-| `YHT_MAX_HOLD_ATTEMPTS` | No | `3` | Max retries when a hold expires |
-| `YHT_BASIC_MAX_PARALLEL_TASKS` | No | `3` | Max concurrent searches for basic users |
-| `YHT_PREMIUM_MAX_PARALLEL_TASKS` | No | `5` | Max concurrent searches for premium users |
-| `DEFAULT_TIMEZONE` | No | `Europe/Istanbul` | Timezone used for date/time display |
-
 ## Access model
 
 - New users have no access by default. They can send an access request through the bot, which notifies all admins.
