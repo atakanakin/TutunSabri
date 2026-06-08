@@ -32,6 +32,7 @@ from core.repositories import (
     mark_access_request_notified,
     reject_access_request,
     revoke_user_access,
+    set_user_yht_active,
     update_user_role,
 )
 from modules.yht.utils import format_turkish_datetime_long
@@ -414,12 +415,13 @@ async def handle_users(message: Message, db_user: User) -> None:
     for user in users:
         username = escape(_safe_username(user.username))
         status = "aktif" if user.is_active else "pasif"
+        yht_status = "aktif" if user.is_yht_active else "pasif"
         full_name = escape(_safe_full_name(user.first_name, user.last_name))
         telegram_user_id = escape(_safe_value(user.telegram_user_id))
         role = escape(_safe_value(_format_role(user.role)))
         lines.append(
             f"{username} | <code>{telegram_user_id}</code>\n"
-            f"<b>Rol:</b> {role} | <b>Durum:</b> {escape(status)}\n"
+            f"<b>Rol:</b> {role} | <b>Durum:</b> {escape(status)} | <b>YHT:</b> {escape(yht_status)}\n"
             f"<b>Ad Soyad:</b> {full_name}"
         )
     await message.answer("\n\n".join(lines), parse_mode="HTML")
@@ -664,3 +666,39 @@ async def handle_revoke(message: Message, db_user: User) -> None:
         )
         return
     await message.answer(f"Bekleyen talep reddedildi: `{telegram_user_id}`")
+
+
+@router.message(Command("yhtactivate"))
+async def handle_yht_activate(message: Message, db_user: User) -> None:
+    if not _is_admin(db_user):
+        await message.answer("Bu komutu kullanma yetkiniz yok.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("Kullanım: `/yhtactivate TELEGRAM_ID`")
+        return
+    telegram_user_id = int(parts[1])
+    async with SessionFactory() as session:
+        user = await set_user_yht_active(session, telegram_user_id=telegram_user_id, is_active=True)
+    if user is None:
+        await message.answer("Kullanıcı bulunamadı.")
+        return
+    await message.answer(f"Kullanıcı `{telegram_user_id}` için YHT erişimi aktif edildi.")
+
+
+@router.message(Command("yhtdeactivate"))
+async def handle_yht_deactivate(message: Message, db_user: User) -> None:
+    if not _is_admin(db_user):
+        await message.answer("Bu komutu kullanma yetkiniz yok.")
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("Kullanım: `/yhtdeactivate TELEGRAM_ID`")
+        return
+    telegram_user_id = int(parts[1])
+    async with SessionFactory() as session:
+        user = await set_user_yht_active(session, telegram_user_id=telegram_user_id, is_active=False)
+    if user is None:
+        await message.answer("Kullanıcı bulunamadı.")
+        return
+    await message.answer(f"Kullanıcı `{telegram_user_id}` için YHT erişimi devre dışı bırakıldı.")
