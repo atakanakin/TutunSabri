@@ -56,6 +56,7 @@ class User(Base):
         index=True,
     )
     is_active: Mapped[bool] = mapped_column(default=True, index=True)
+    is_yht_active: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

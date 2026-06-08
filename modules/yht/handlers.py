@@ -39,7 +39,6 @@ from modules.yht.utils import (
 )
 from tasks.worker import monitor_yht_task
 
-
 router = Router(name="yht")
 
 
@@ -217,6 +216,12 @@ async def _release_held_task(message: Message, task, db_user: User) -> bool:
 
 @router.message(Command("yht"))
 async def handle_yht_start(message: Message, state: FSMContext, db_user: User) -> None:
+    if not db_user.is_yht_active:
+        await message.answer(
+            "*YHT işlemi bir süreliğine kapalıdır.*\n\n"
+            "Anlayışınız için teşekkür ederim."
+        )
+        return
     await state.set_state(SearchStates.from_station)
     await message.answer(
         "Kalkış şehrini yazınız.\n"

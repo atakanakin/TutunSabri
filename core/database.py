@@ -60,6 +60,7 @@ async def _apply_sqlite_compatibility_migrations(connection: AsyncSession) -> No
 
     await _ensure_column(connection, "users", "role", "VARCHAR(16) DEFAULT 'basic'")
     await _ensure_column(connection, "users", "is_active", "BOOLEAN DEFAULT 1")
+    await _ensure_column(connection, "users", "is_yht_active", "BOOLEAN DEFAULT 0")
     await _ensure_column(connection, "access_requests", "user_id", "INTEGER")
     await _ensure_column(connection, "access_requests", "username", "VARCHAR(255)")
     await _ensure_column(connection, "access_requests", "first_name", "VARCHAR(255)")
