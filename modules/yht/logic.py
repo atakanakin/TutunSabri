@@ -1,21 +1,172 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from curl_cffi.requests import AsyncSession
+from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
 from modules.yht.config import yht_settings
 from modules.yht.utils import normalize_text
 
 
+class _BrowserResponse:
+    def __init__(self, status_code: int, data: Any, headers: Optional[Dict[str, str]] = None) -> None:
+        self.status_code = status_code
+        self._data = data
+        self.headers = headers or {}
+
+    def json(self) -> Any:
+        return self._data
+
+
+class _BrowserTransport:
+    def __init__(self) -> None:
+        self._playwright: Optional[Playwright] = None
+        self._browser: Optional[Browser] = None
+        self._context: Optional[BrowserContext] = None
+        self._page: Optional[Page] = None
+        self._lock: Optional[asyncio.Lock] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        current_loop = asyncio.get_running_loop()
+        if self._lock is None or self._loop is not current_loop:
+            self._lock = asyncio.Lock()
+            self._loop = current_loop
+        return self._lock
+
+    async def _ensure_page(self) -> Page:
+        if self._page is not None and not self._page.is_closed():
+            return self._page
+
+        await self._cleanup()
+        self._playwright = await async_playwright().start()
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+        ]
+        for channel in ("chrome", "msedge"):
+            try:
+                self._browser = await self._playwright.chromium.launch(
+                    channel=channel,
+                    headless=False,
+                    args=launch_args,
+                )
+                break
+            except Exception:
+                continue
+        if self._browser is None:
+            self._browser = await self._playwright.chromium.launch(
+                headless=False,
+                args=launch_args,
+            )
+
+        self._context = await self._browser.new_context()
+        await self._context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+        self._page = await self._context.new_page()
+        await self._page.goto(
+            yht_settings.web_referer,
+            wait_until="domcontentloaded",
+            timeout=yht_settings.request_timeout_seconds * 1000,
+        )
+        await self._page.wait_for_function(
+            "() => window.turnstile && Array.from(document.querySelectorAll('*')).some(el => el.__vue__ && el.__vue__.$store)",
+            timeout=yht_settings.request_timeout_seconds * 1000,
+        )
+        await asyncio.sleep(2)
+        return self._page
+
+    async def post_tms(self, path: str, payload: Dict[str, Any]) -> _BrowserResponse:
+        async with self._get_lock():
+            for attempt in range(2):
+                try:
+                    page = await self._ensure_page()
+                    result = await page.evaluate(
+                        """async ({ path, payload }) => {
+                            const appEl = Array.from(document.querySelectorAll('*')).find(
+                                el => el.__vue__ && el.__vue__.$store
+                            );
+                            if (!appEl || !appEl.__vue__) {
+                                throw new Error('TCDD Vue instance not ready');
+                            }
+                            const vm = appEl.__vue__;
+                            const http = vm.axios || vm.$http;
+                            const baseUrl = vm.$store.getters.getTmsServiceUrl;
+                            try {
+                                const r = await http.post(baseUrl + path, payload);
+                                return {
+                                    status: r.status || 200,
+                                    data: r.data,
+                                    headers: r.headers || {},
+                                };
+                            } catch (err) {
+                                if (err && err.response) {
+                                    return {
+                                        status: err.response.status || 500,
+                                        data: err.response.data,
+                                        headers: err.response.headers || {},
+                                    };
+                                }
+                                throw err;
+                            }
+                        }""",
+                        {"path": path, "payload": payload},
+                    )
+                    return _BrowserResponse(
+                        status_code=int(result.get("status", 500)),
+                        data=result.get("data"),
+                        headers=result.get("headers") or {},
+                    )
+                except Exception:
+                    await self._cleanup()
+                    if attempt == 1:
+                        raise
+        raise YHTError("TCDD tarayıcı isteği başarısız oldu.")
+
+    async def _cleanup(self) -> None:
+        for obj, method in (
+            (self._page, "close"),
+            (self._context, "close"),
+            (self._browser, "close"),
+            (self._playwright, "stop"),
+        ):
+            if obj is not None:
+                try:
+                    await getattr(obj, method)()
+                except Exception:
+                    pass
+        self._page = None
+        self._context = None
+        self._browser = None
+        self._playwright = None
+
+
+_browser_transport = _BrowserTransport()
+
+
 class YHTError(Exception):
     pass
+
+
+class YHTRateLimitError(YHTError):
+    """TCDD throttled the request (HTTP 429/503).
+
+    Carries the server-provided cooldown (``Retry-After``) when available so the
+    caller can wait the requested amount instead of hammering the endpoint.
+    """
+
+    def __init__(self, message: str, *, retry_after: Optional[float] = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 @dataclass
@@ -35,35 +186,48 @@ class TCDDClient:
         self._timezone = ZoneInfo(yht_settings.default_timezone)
         self._station_cache_path = Path(yht_settings.station_cache_path)
         self._station_cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self._session = AsyncSession(impersonate="chrome131", timeout=30)
+        # curl_cffi reproduces the TLS/JA3 + HTTP2 fingerprint AND the matching
+        # identity headers (User-Agent, sec-ch-ua, sec-ch-ua-platform,
+        # Accept-Encoding, header ordering) for the chosen browser profile. We let
+        # it own all of those so they stay mutually consistent — hand-writing a
+        # User-Agent that disagrees with the TLS fingerprint is exactly what gives
+        # an automated client away.
+        self._session = AsyncSession(
+            impersonate=yht_settings.impersonate,
+            timeout=yht_settings.request_timeout_seconds,
+        )
 
     @property
-    def _headers(self) -> dict[str, str]:
+    def _base_headers(self) -> dict[str, str]:
+        # Only the headers a real ``fetch()``/XHR from the TCDD web app adds on top
+        # of the browser's own defaults. Identity + transport headers
+        # (User-Agent, sec-ch-ua*, Accept-Encoding) are intentionally omitted so
+        # curl_cffi supplies ones that match the impersonated browser.
         return {
-            "sec-ch-ua-platform": '"macOS"',
             "Authorization": yht_settings.authorization,
-            "Accept-Language": "tr",
-            "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
-            "sec-ch-ua-mobile": "?0",
             "unit-id": yht_settings.unit_id,
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
-            ),
             "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            "Origin": "https://ebilet.tcddtasimacilik.gov.tr",
+            "Accept-Language": "tr",
+            "Origin": yht_settings.web_origin,
+            "Referer": yht_settings.web_referer,
+            # XHR fetch-metadata (a browser navigation would send different values,
+            # so these must be set explicitly rather than left to the default).
             "Sec-Fetch-Site": "same-site",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Dest": "empty",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
         }
+
+    @property
+    def _json_headers(self) -> dict[str, str]:
+        # POST bodies are JSON; a browser only sends Content-Type on requests that
+        # actually carry a body, so GETs use ``_base_headers`` instead.
+        return {**self._base_headers, "Content-Type": "application/json"}
 
     async def close(self) -> None:
         await self._session.close()
 
     async def refresh_station_cache(self) -> dict[str, int]:
-        response = await self._session.get(yht_settings.station_base_url, headers=self._headers)
+        response = await self._session.get(yht_settings.station_base_url, headers=self._base_headers)
         self._raise_for_tcdd(response)
         payload = response.json()
         station_map = {}
@@ -176,10 +340,17 @@ class TCDDClient:
             "searchType": "DOMESTIC",
             "blTrainTypes": ["TURISTIK_TREN"],
         }
-        url = f"{yht_settings.api_base_url}/train/train-availability?environment=dev&userId=1"
-        response = await self._session.post(url, json=payload, headers=self._headers)
-        self._raise_for_tcdd(response)
+        response = await _browser_transport.post_tms("/train/train-availability", payload)
         data = response.json()
+        if (
+            response.status_code == 400
+            and isinstance(data, dict)
+            and data.get("code") in (604, 12511)
+        ):
+            return []
+        self._raise_for_tcdd(response)
+        if not isinstance(data, dict):
+            return []
         availabilities: list[TrainAvailability] = []
         for item in data.get("trainLegs", [{}])[0].get("trainAvailabilities", []):
             trains = item.get("trains") or []
@@ -228,10 +399,7 @@ class TCDDClient:
             "trainId": train_id,
             "legIndex": 0,
         }
-        seat_map_url = (
-            f"{yht_settings.api_base_url}/seat-maps/load-by-train-id?environment=dev&userId=1"
-        )
-        response = await self._session.post(seat_map_url, json=payload, headers=self._headers)
+        response = await _browser_transport.post_tms("/seat-maps/load-by-train-id", payload)
         self._raise_for_tcdd(response)
         wagon = self._select_wagon_with_empty_seat(response.json().get("seatMaps", []))
         if wagon is None:
@@ -247,10 +415,7 @@ class TCDDClient:
             "totalPassengerCount": 1,
             "fareFamilyId": 0,
         }
-        reserve_url = (
-            f"{yht_settings.api_base_url}/inventory/select-seat?environment=dev&userId=1"
-        )
-        response = await self._session.post(reserve_url, json=reserve_payload, headers=self._headers)
+        response = await _browser_transport.post_tms("/inventory/select-seat", reserve_payload)
         self._raise_for_tcdd(response)
         reserve_data = response.json()
         return {
@@ -273,8 +438,7 @@ class TCDDClient:
             "allocationId": allocation_id,
             "seatNumber": seat_number,
         }
-        url = f"{yht_settings.api_base_url}/inventory/release-seat?environment=dev&userId=1"
-        response = await self._session.post(url, json=payload, headers=self._headers)
+        response = await _browser_transport.post_tms("/inventory/release-seat", payload)
         self._raise_for_tcdd(response)
 
     async def check_specific_departure(
@@ -347,7 +511,39 @@ class TCDDClient:
         return None
 
     def _raise_for_tcdd(self, response) -> None:
-        if response.status_code >= 400:
-            raise YHTError(
-                f"TCDD isteği başarısız oldu. HTTP durum kodu: {response.status_code}"
+        status = response.status_code
+        if status < 400:
+            return
+        # Treat throttling / temporary unavailability separately so the caller can
+        # back off politely instead of burning its error budget and quitting.
+        if status in (429, 503):
+            raise YHTRateLimitError(
+                f"TCDD isteği sınırlandırıldı. HTTP durum kodu: {status}",
+                retry_after=self._parse_retry_after(response),
             )
+        raise YHTError(
+            f"TCDD isteği başarısız oldu. HTTP durum kodu: {status}"
+        )
+
+    @staticmethod
+    def _parse_retry_after(response) -> Optional[float]:
+        """Read a ``Retry-After`` header, as either a seconds value or HTTP date."""
+        try:
+            raw = response.headers.get("Retry-After")
+        except Exception:
+            return None
+        if not raw:
+            return None
+        raw = raw.strip()
+        if raw.isdigit():
+            return float(raw)
+        try:
+            retry_at = parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            return None
+        if retry_at is None:
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        delta = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        return max(0.0, delta)
