@@ -48,9 +48,9 @@ class YHTSettings(BaseSettings):
     # Each poll is spread by ±ratio so the traffic never lands on a fixed period.
     poll_jitter_ratio: float = Field(0.25, alias="POLL_JITTER_RATIO")
     max_poll_errors: int = Field(3, alias="MAX_POLL_ERRORS")
-    # Consecutive throttled polls tolerated before the task is stopped and the
-    # user/admins are notified.
-    max_rate_limit_streak: int = Field(10, alias="MAX_RATE_LIMIT_STREAK")
+    # If TCDD keeps throttling us for this long without a single successful
+    # request, the task is cancelled and the user/admins are notified.
+    rate_limit_give_up_minutes: float = Field(15.0, alias="RATE_LIMIT_GIVE_UP_MINUTES")
     # Exponential backoff applied after consecutive hard errors (seconds).
     error_backoff_base_seconds: float = Field(15.0, alias="ERROR_BACKOFF_BASE_SECONDS")
     error_backoff_max_seconds: float = Field(300.0, alias="ERROR_BACKOFF_MAX_SECONDS")
