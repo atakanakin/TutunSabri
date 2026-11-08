@@ -33,6 +33,9 @@ class YHTSettings(BaseSettings):
     # they can never drift out of sync.
     impersonate: str = Field("chrome131", alias="TCDD_IMPERSONATE")
     request_timeout_seconds: int = Field(30, alias="TCDD_REQUEST_TIMEOUT_SECONDS")
+    # Turnstile generally needs a visible browser. On a server without a display
+    # run under Xvfb (e.g. ``xvfb-run``) or set this to true and verify it works.
+    browser_headless: bool = Field(False, alias="TCDD_BROWSER_HEADLESS")
     web_origin: str = Field(
         "https://ebilet.tcddtasimacilik.gov.tr", alias="TCDD_WEB_ORIGIN"
     )
@@ -45,6 +48,9 @@ class YHTSettings(BaseSettings):
     # Each poll is spread by ±ratio so the traffic never lands on a fixed period.
     poll_jitter_ratio: float = Field(0.25, alias="POLL_JITTER_RATIO")
     max_poll_errors: int = Field(3, alias="MAX_POLL_ERRORS")
+    # Consecutive throttled polls tolerated before the task is stopped and the
+    # user/admins are notified.
+    max_rate_limit_streak: int = Field(10, alias="MAX_RATE_LIMIT_STREAK")
     # Exponential backoff applied after consecutive hard errors (seconds).
     error_backoff_base_seconds: float = Field(15.0, alias="ERROR_BACKOFF_BASE_SECONDS")
     error_backoff_max_seconds: float = Field(300.0, alias="ERROR_BACKOFF_MAX_SECONDS")
