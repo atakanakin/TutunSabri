@@ -61,6 +61,10 @@ _POST_JS = """async ({ path, payload }) => {
 
 _CHROMIUM_CHANNELS = ("chrome", "msedge")
 
+# Upper bound for each browser/driver shutdown step. A wedged Chromium must not
+# be able to hold the transport lock (and with it every task) forever.
+_CLEANUP_STEP_TIMEOUT_SECONDS = 5.0
+
 # Error codes TCDD returns together with HTTP 400 on train-availability when
 # there is simply nothing to list for the query. They are treated as an empty
 # result instead of an error. Observed values; their exact meaning is not
@@ -70,6 +74,20 @@ _EMPTY_AVAILABILITY_CODES = frozenset({604, 12511})
 
 class YHTError(Exception):
     pass
+
+
+class YHTAmbiguousRequestError(YHTError):
+    """A non-idempotent request may or may not have been applied by TCDD.
+
+    Raised when the transport failed after the request could have been sent
+    (timeout, browser crash, network error) so the outcome is unknown. Callers
+    must not blindly repeat the operation: for a seat selection the seat may
+    already be held.
+    """
+
+
+class YHTTransportClosedError(YHTError):
+    """The shared browser transport was shut down; no new requests are served."""
 
 
 class YHTRateLimitError(YHTError):
@@ -113,6 +131,7 @@ class _BrowserTransport:
         self._page: Optional[Page] = None
         self._lock: Optional[asyncio.Lock] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._closed = False
 
     def _get_lock(self) -> asyncio.Lock:
         current_loop = asyncio.get_running_loop()
@@ -177,13 +196,21 @@ class _BrowserTransport:
         could take a seat twice.
         """
         timeout = float(yht_settings.request_timeout_seconds)
+        # goto + wait_for_function each take up to ``timeout``; leave headroom
+        # for process start-up so the whole set-up is bounded, too.
+        setup_timeout = timeout * 3 + _PAGE_SETTLE_SECONDS
         error = "TCDD tarayıcı isteği başarısız oldu."
+        ambiguous = False
         async with self._get_lock():
             for _ in range(2):
+                if self._closed:
+                    raise YHTTransportClosedError("TCDD tarayıcısı kapatıldı.")
                 try:
-                    page = await self._ensure_page()
+                    page = await asyncio.wait_for(
+                        self._ensure_page(), timeout=setup_timeout
+                    )
                 except Exception as exc:
-                    error = f"TCDD tarayıcısı hazırlanamadı: {exc}"
+                    error = f"TCDD tarayıcısı hazırlanamadı: {exc!r}"
                     await self._cleanup()
                     continue
 
@@ -194,6 +221,7 @@ class _BrowserTransport:
                     )
                 except Exception as exc:
                     error = f"TCDD tarayıcı isteği başarısız oldu: {exc!r}"
+                    ambiguous = True
                     await self._cleanup()
                     if idempotent:
                         continue
@@ -205,6 +233,7 @@ class _BrowserTransport:
                     continue
                 if result.get("networkError") is not None:
                     error = f"TCDD ağ hatası: {result['networkError']}"
+                    ambiguous = True
                     await self._cleanup()
                     if idempotent:
                         continue
@@ -215,11 +244,33 @@ class _BrowserTransport:
                     data=result.get("data"),
                     headers=result.get("headers") or {},
                 )
+        if ambiguous and not idempotent:
+            raise YHTAmbiguousRequestError(error)
         raise YHTError(error)
 
     async def aclose(self) -> None:
+        """Permanently shut the transport down.
+
+        New requests fail with ``YHTTransportClosedError`` instead of silently
+        relaunching a browser that nobody would close again.
+        """
+        self._closed = True
         async with self._get_lock():
             await self._cleanup()
+
+    @staticmethod
+    async def _close_quietly(obj: Any, method: str) -> None:
+        try:
+            await asyncio.wait_for(
+                getattr(obj, method)(), timeout=_CLEANUP_STEP_TIMEOUT_SECONDS
+            )
+        except Exception as exc:
+            logger.warning(
+                "Browser cleanup step %s.%s failed or timed out: %r",
+                type(obj).__name__,
+                method,
+                exc,
+            )
 
     async def _cleanup(self) -> None:
         for obj, method in (
@@ -229,10 +280,7 @@ class _BrowserTransport:
             (self._playwright, "stop"),
         ):
             if obj is not None:
-                try:
-                    await getattr(obj, method)()
-                except Exception:
-                    pass
+                await self._close_quietly(obj, method)
         self._page = None
         self._context = None
         self._browser = None
