@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 import traceback
 from datetime import datetime, timezone
 from html import escape
@@ -200,17 +201,34 @@ def _hold_message(task, hold_result: dict, hold_attempt_count: int) -> str:
     )
 
 
-async def _fail_for_rate_limit(bot: Bot, task, streak: int, exc: Exception) -> None:
+def _rate_limit_elapsed(since: float | None) -> float:
+    return 0.0 if since is None else time.monotonic() - since
+
+
+def _rate_limit_expired(since: float | None) -> bool:
+    return _rate_limit_elapsed(since) >= yht_settings.rate_limit_give_up_minutes * 60.0
+
+
+def _cap_to_give_up(delay: float, since: float | None) -> float:
+    """Never sleep past the give-up deadline, so the task ends on time."""
+    remaining = yht_settings.rate_limit_give_up_minutes * 60.0 - _rate_limit_elapsed(
+        since
+    )
+    return max(1.0, min(delay, remaining + 1.0))
+
+
+async def _fail_for_rate_limit(bot: Bot, task, exc: Exception) -> None:
+    minutes = yht_settings.rate_limit_give_up_minutes
     await _fail_task_with_notifications(
         bot,
         task_id=task.task_id,
         user_id=task.user_id,
         user_message=(
-            "TCDD isteklerimizi art arda sınırladığı için arama durduruldu. "
-            "Lütfen daha sonra tekrar deneyin."
+            f"TCDD {minutes:g} dakikadır isteklerimizi sınırladığı için arama "
+            "iptal edildi. Lütfen daha sonra tekrar deneyin."
         ),
         last_result="rate limited",
-        error_text=f"{streak} ardışık rate limit: {exc}",
+        error_text=f"{minutes:g} dakikadır kesintisiz rate limit: {exc}",
     )
 
 
@@ -218,7 +236,7 @@ async def _fail_for_rate_limit(bot: Bot, task, streak: int, exc: Exception) -> N
 async def monitor_yht_task(task_id: str) -> None:
     client = TCDDClient()
     error_count = 0
-    rate_limit_streak = 0
+    rate_limited_since: float | None = None
     hold_error_count = 0
     deferred_sleep: float | None = None
     sleep_seconds = yht_settings.poll_interval_seconds
@@ -355,9 +373,10 @@ async def monitor_yht_task(task_id: str) -> None:
                     # budget, just wait out the server-requested cooldown and
                     # retry. This keeps the bot polite and avoids escalating a
                     # temporary 429 into a permanent block.
-                    rate_limit_streak += 1
-                    if rate_limit_streak >= yht_settings.max_rate_limit_streak:
-                        await _fail_for_rate_limit(bot, task, rate_limit_streak, exc)
+                    if rate_limited_since is None:
+                        rate_limited_since = time.monotonic()
+                    if _rate_limit_expired(rate_limited_since):
+                        await _fail_for_rate_limit(bot, task, exc)
                         return
                     await update_task_status(
                         session,
@@ -365,13 +384,15 @@ async def monitor_yht_task(task_id: str) -> None:
                         status=SearchTaskStatus.running,
                         last_result="rate limited, cooling down",
                     )
-                    sleep_seconds = _rate_limit_sleep(exc.retry_after)
+                    sleep_seconds = _cap_to_give_up(
+                        _rate_limit_sleep(exc.retry_after), rate_limited_since
+                    )
                 except YHTTransportClosedError:
                     # Worker is shutting down. Leave the task as it is so it can
                     # be resumed on the next start instead of failing it.
                     return
                 except YHTError as exc:
-                    rate_limit_streak = 0
+                    rate_limited_since = None
                     error_count += 1
                     await update_task_status(
                         session,
@@ -394,7 +415,7 @@ async def monitor_yht_task(task_id: str) -> None:
                         return
                     sleep_seconds = _error_backoff(error_count)
                 except Exception as exc:
-                    rate_limit_streak = 0
+                    rate_limited_since = None
                     error_count += 1
                     await update_task_status(
                         session,
@@ -418,7 +439,12 @@ async def monitor_yht_task(task_id: str) -> None:
                     sleep_seconds = _error_backoff(error_count)
                 else:
                     error_count = 0
-                    rate_limit_streak = 0
+                    # A successful availability check only ends a throttling
+                    # window when we are not about to hold a seat: if the hold
+                    # itself keeps getting throttled, the window must keep
+                    # running or the task would never give up.
+                    if availability is None or availability.economy_available <= 0:
+                        rate_limited_since = None
 
                     if availability is None:
                         previous_text = task.last_result or ""
@@ -450,7 +476,7 @@ async def monitor_yht_task(task_id: str) -> None:
                                     to_station=task.to_station,
                                 )
                                 hold_error_count = 0
-                                rate_limit_streak = 0
+                                rate_limited_since = None
                                 break
                             except YHTTransportClosedError:
                                 return
@@ -475,20 +501,16 @@ async def monitor_yht_task(task_id: str) -> None:
                                 hold_trace = traceback.format_exc()
                                 if isinstance(hold_exc, YHTRateLimitError):
                                     # Throttling is not a hold failure; it only
-                                    # counts toward the rate limit streak.
-                                    rate_limit_streak += 1
+                                    # counts toward the rate limit window.
+                                    if rate_limited_since is None:
+                                        rate_limited_since = time.monotonic()
                                     hold_rate_limited = True
                                     hold_retry_after = hold_exc.retry_after
-                                    if (
-                                        rate_limit_streak
-                                        >= yht_settings.max_rate_limit_streak
-                                    ):
-                                        await _fail_for_rate_limit(
-                                            bot, task, rate_limit_streak, hold_exc
-                                        )
+                                    if _rate_limit_expired(rate_limited_since):
+                                        await _fail_for_rate_limit(bot, task, hold_exc)
                                         return
                                 else:
-                                    rate_limit_streak = 0
+                                    rate_limited_since = None
                                     hold_rate_limited = False
                                     hold_error_count += 1
                                     hold_error_trace = hold_trace
@@ -543,7 +565,10 @@ async def monitor_yht_task(task_id: str) -> None:
                                 ),
                             )
                             deferred_sleep = (
-                                _rate_limit_sleep(hold_retry_after)
+                                _cap_to_give_up(
+                                    _rate_limit_sleep(hold_retry_after),
+                                    rate_limited_since,
+                                )
                                 if hold_rate_limited
                                 else _jittered(yht_settings.hold_retry_delay_seconds)
                             )
