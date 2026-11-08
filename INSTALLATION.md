@@ -63,6 +63,16 @@ Fill out the BOT_TOKEN part
 uv sync
 ```
 
+### Browser for TCDD requests
+
+TCDD requests are sent through a real browser (Playwright). Install Google Chrome, or the bundled Chromium:
+
+```bash
+uv run playwright install --with-deps chromium
+```
+
+The browser runs with a visible window by default (`TCDD_BROWSER_HEADLESS=false`). On a server without a display, run the services under Xvfb or set `TCDD_BROWSER_HEADLESS=true` and verify that requests still succeed.
+
 ## 6. Start and enable Redis
 
 ```bash
