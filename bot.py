@@ -17,7 +17,7 @@ from core.repositories import (
     set_task_message_id,
     update_task_status,
 )
-from modules.yht.logic import TCDDClient
+from modules.yht.logic import TCDDClient, close_browser_transport
 from modules.yht.handlers import router as yht_router
 from tasks.worker import broker, monitor_yht_task
 
@@ -87,7 +87,10 @@ async def run_bot() -> None:
     dispatcher.callback_query.middleware(ActiveUserMiddleware())
     dispatcher.include_router(core_router)
     dispatcher.include_router(yht_router)
-    await dispatcher.start_polling(bot)
+    try:
+        await dispatcher.start_polling(bot)
+    finally:
+        await close_browser_transport()
 
 
 def main() -> None:

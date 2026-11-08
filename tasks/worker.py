@@ -23,7 +23,12 @@ from core.repositories import (
     update_task_status,
 )
 from modules.yht.config import yht_settings
-from modules.yht.logic import TCDDClient, YHTError, YHTRateLimitError
+from modules.yht.logic import (
+    TCDDClient,
+    YHTError,
+    YHTRateLimitError,
+    close_browser_transport,
+)
 from modules.yht.utils import format_route_sentence
 
 
@@ -59,10 +64,23 @@ def _rate_limit_sleep(retry_after: float | None) -> float:
     return _jittered(cooldown, 0.1)
 
 
+def _retry_after_delay(retry_after: float | None, default: float) -> float:
+    """Wait for a short retry, honoring Retry-After but never beyond the cap."""
+    delay = retry_after if retry_after else default
+    return _jittered(min(delay, yht_settings.error_backoff_max_seconds))
+
+
 @broker.on_event("startup")
 async def startup() -> None:
     await init_database()
     await TCDDClient().ensure_station_cache()
+
+
+@broker.on_event("shutdown")
+async def shutdown() -> None:
+    # The browser is shared by every task in this worker, so it is closed here
+    # and not in the per-task ``client.close()``.
+    await close_browser_transport()
 
 
 def _format_admin_error(task, user, error_text: str) -> str:
@@ -155,6 +173,7 @@ def _hold_message(task, hold_result: dict, hold_attempt_count: int) -> str:
 async def monitor_yht_task(task_id: str) -> None:
     client = TCDDClient()
     error_count = 0
+    rate_limit_streak = 0
     hold_error_count = 0
     sleep_seconds = yht_settings.poll_interval_seconds
     current_user_id = None
@@ -272,6 +291,22 @@ async def monitor_yht_task(task_id: str) -> None:
                     # budget, just wait out the server-requested cooldown and
                     # retry. This keeps the bot polite and avoids escalating a
                     # temporary 429 into a permanent block.
+                    rate_limit_streak += 1
+                    if rate_limit_streak >= yht_settings.max_rate_limit_streak:
+                        await _fail_task_with_notifications(
+                            bot,
+                            task_id=task_id,
+                            user_id=task.user_id,
+                            user_message=(
+                                "TCDD isteklerimizi art arda sınırladığı için "
+                                "arama durduruldu. Lütfen daha sonra tekrar deneyin."
+                            ),
+                            last_result="rate limited",
+                            error_text=(
+                                f"{rate_limit_streak} ardışık rate limit: {exc}"
+                            ),
+                        )
+                        return
                     await update_task_status(
                         session,
                         task_id=task_id,
@@ -325,6 +360,7 @@ async def monitor_yht_task(task_id: str) -> None:
                     sleep_seconds = _error_backoff(error_count)
                 else:
                     error_count = 0
+                    rate_limit_streak = 0
 
                     if availability is None:
                         previous_text = task.last_result or ""
@@ -370,13 +406,14 @@ async def monitor_yht_task(task_id: str) -> None:
                                     )
                                     return
                                 if attempt_index < remaining_attempts - 1:
-                                    retry_delay = yht_settings.hold_retry_delay_seconds
-                                    if (
-                                        isinstance(hold_exc, YHTRateLimitError)
-                                        and hold_exc.retry_after
-                                    ):
-                                        retry_delay = hold_exc.retry_after
-                                    await asyncio.sleep(_jittered(retry_delay))
+                                    await asyncio.sleep(
+                                        _retry_after_delay(
+                                            hold_exc.retry_after
+                                            if isinstance(hold_exc, YHTRateLimitError)
+                                            else None,
+                                            yht_settings.hold_retry_delay_seconds,
+                                        )
+                                    )
                         if hold_result is None:
                             await update_task_status(
                                 session,
