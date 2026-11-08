@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -17,17 +18,94 @@ from modules.yht.config import yht_settings
 from modules.yht.utils import normalize_text
 
 
+logger = logging.getLogger(__name__)
+
+# Seconds to let the TCDD single-page app finish bootstrapping after the Vue
+# store and Turnstile are available, before the first request is issued.
+_PAGE_SETTLE_SECONDS = 2.0
+
+# Evaluated inside the TCDD page. The Vue root instance is looked up once and
+# cached on ``window`` so we don't walk the whole DOM on every call. It never
+# throws for "expected" conditions; it reports them as plain data so Python can
+# tell "request definitely not sent" (notReady) from "outcome unknown"
+# (networkError).
+_POST_JS = """async ({ path, payload }) => {
+    const findVm = () => {
+        if (window.__tcddVm && window.__tcddVm.$store) return window.__tcddVm;
+        const el = Array.from(document.querySelectorAll('*')).find(
+            e => e.__vue__ && e.__vue__.$store
+        );
+        window.__tcddVm = el ? el.__vue__ : null;
+        return window.__tcddVm;
+    };
+    const vm = findVm();
+    const http = vm && (vm.axios || vm.$http);
+    const baseUrl = vm && vm.$store.getters.getTmsServiceUrl;
+    if (!http || !baseUrl) {
+        return { notReady: true };
+    }
+    try {
+        const r = await http.post(baseUrl + path, payload);
+        return { status: r.status || 200, data: r.data, headers: r.headers || {} };
+    } catch (err) {
+        if (err && err.response) {
+            return {
+                status: err.response.status || 500,
+                data: err.response.data,
+                headers: err.response.headers || {},
+            };
+        }
+        return { networkError: String((err && err.message) || err) };
+    }
+}"""
+
+_CHROMIUM_CHANNELS = ("chrome", "msedge")
+
+# Error codes TCDD returns together with HTTP 400 on train-availability when
+# there is simply nothing to list for the query. They are treated as an empty
+# result instead of an error. Observed values; their exact meaning is not
+# documented by TCDD, so extend this set only from real responses.
+_EMPTY_AVAILABILITY_CODES = frozenset({604, 12511})
+
+
+class YHTError(Exception):
+    pass
+
+
+class YHTRateLimitError(YHTError):
+    """TCDD throttled the request (HTTP 429/503).
+
+    Carries the server-provided cooldown (``Retry-After``) when available so the
+    caller can wait the requested amount instead of hammering the endpoint.
+    """
+
+    def __init__(self, message: str, *, retry_after: Optional[float] = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class _BrowserResponse:
-    def __init__(self, status_code: int, data: Any, headers: Optional[Dict[str, str]] = None) -> None:
+    def __init__(
+        self, status_code: int, data: Any, headers: Optional[Dict[str, Any]] = None
+    ) -> None:
         self.status_code = status_code
         self._data = data
-        self.headers = headers or {}
+        # Browser (axios) header names are lowercase; normalise so lookups such
+        # as ``Retry-After`` are case-insensitive.
+        self.headers = {str(k).lower(): v for k, v in (headers or {}).items()}
 
     def json(self) -> Any:
         return self._data
 
 
 class _BrowserTransport:
+    """Sends TCDD API calls through the site's own page context.
+
+    A single shared page is used, so calls are serialised by a lock. Every step
+    that can hang is bounded by ``request_timeout_seconds`` so one stuck request
+    cannot freeze every monitoring task.
+    """
+
     def __init__(self) -> None:
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
@@ -43,31 +121,33 @@ class _BrowserTransport:
             self._loop = current_loop
         return self._lock
 
+    async def _launch_browser(self) -> Browser:
+        assert self._playwright is not None
+        launch_args = ["--disable-blink-features=AutomationControlled"]
+        headless = yht_settings.browser_headless
+        for channel in _CHROMIUM_CHANNELS:
+            try:
+                browser = await self._playwright.chromium.launch(
+                    channel=channel, headless=headless, args=launch_args
+                )
+            except Exception as exc:
+                logger.info("Browser channel %r unavailable: %s", channel, exc)
+                continue
+            logger.info("Launched browser channel %r (headless=%s)", channel, headless)
+            return browser
+        logger.info("Falling back to bundled chromium (headless=%s)", headless)
+        return await self._playwright.chromium.launch(
+            headless=headless, args=launch_args
+        )
+
     async def _ensure_page(self) -> Page:
         if self._page is not None and not self._page.is_closed():
             return self._page
 
         await self._cleanup()
+        timeout_ms = yht_settings.request_timeout_seconds * 1000
         self._playwright = await async_playwright().start()
-        launch_args = [
-            "--disable-blink-features=AutomationControlled",
-        ]
-        for channel in ("chrome", "msedge"):
-            try:
-                self._browser = await self._playwright.chromium.launch(
-                    channel=channel,
-                    headless=False,
-                    args=launch_args,
-                )
-                break
-            except Exception:
-                continue
-        if self._browser is None:
-            self._browser = await self._playwright.chromium.launch(
-                headless=False,
-                args=launch_args,
-            )
-
+        self._browser = await self._launch_browser()
         self._context = await self._browser.new_context()
         await self._context.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
@@ -76,61 +156,70 @@ class _BrowserTransport:
         await self._page.goto(
             yht_settings.web_referer,
             wait_until="domcontentloaded",
-            timeout=yht_settings.request_timeout_seconds * 1000,
+            timeout=timeout_ms,
         )
         await self._page.wait_for_function(
             "() => window.turnstile && Array.from(document.querySelectorAll('*')).some(el => el.__vue__ && el.__vue__.$store)",
-            timeout=yht_settings.request_timeout_seconds * 1000,
+            timeout=timeout_ms,
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(_PAGE_SETTLE_SECONDS)
         return self._page
 
-    async def post_tms(self, path: str, payload: Dict[str, Any]) -> _BrowserResponse:
+    async def post_tms(
+        self, path: str, payload: Dict[str, Any], *, idempotent: bool = False
+    ) -> _BrowserResponse:
+        """POST ``payload`` to a TMS endpoint through the browser.
+
+        On failure the browser is recycled. The request is re-sent only when it
+        is known not to have reached the server (page not ready / browser could
+        not start) or when ``idempotent`` is true. Non-idempotent calls such as
+        seat selection are never replayed after an ambiguous failure, since that
+        could take a seat twice.
+        """
+        timeout = float(yht_settings.request_timeout_seconds)
+        error = "TCDD tarayıcı isteği başarısız oldu."
         async with self._get_lock():
-            for attempt in range(2):
+            for _ in range(2):
                 try:
                     page = await self._ensure_page()
-                    result = await page.evaluate(
-                        """async ({ path, payload }) => {
-                            const appEl = Array.from(document.querySelectorAll('*')).find(
-                                el => el.__vue__ && el.__vue__.$store
-                            );
-                            if (!appEl || !appEl.__vue__) {
-                                throw new Error('TCDD Vue instance not ready');
-                            }
-                            const vm = appEl.__vue__;
-                            const http = vm.axios || vm.$http;
-                            const baseUrl = vm.$store.getters.getTmsServiceUrl;
-                            try {
-                                const r = await http.post(baseUrl + path, payload);
-                                return {
-                                    status: r.status || 200,
-                                    data: r.data,
-                                    headers: r.headers || {},
-                                };
-                            } catch (err) {
-                                if (err && err.response) {
-                                    return {
-                                        status: err.response.status || 500,
-                                        data: err.response.data,
-                                        headers: err.response.headers || {},
-                                    };
-                                }
-                                throw err;
-                            }
-                        }""",
-                        {"path": path, "payload": payload},
-                    )
-                    return _BrowserResponse(
-                        status_code=int(result.get("status", 500)),
-                        data=result.get("data"),
-                        headers=result.get("headers") or {},
-                    )
-                except Exception:
+                except Exception as exc:
+                    error = f"TCDD tarayıcısı hazırlanamadı: {exc}"
                     await self._cleanup()
-                    if attempt == 1:
-                        raise
-        raise YHTError("TCDD tarayıcı isteği başarısız oldu.")
+                    continue
+
+                try:
+                    result = await asyncio.wait_for(
+                        page.evaluate(_POST_JS, {"path": path, "payload": payload}),
+                        timeout=timeout,
+                    )
+                except Exception as exc:
+                    error = f"TCDD tarayıcı isteği başarısız oldu: {exc!r}"
+                    await self._cleanup()
+                    if idempotent:
+                        continue
+                    break
+
+                if result.get("notReady"):
+                    error = "TCDD sayfası henüz hazır değil."
+                    await self._cleanup()
+                    continue
+                if result.get("networkError") is not None:
+                    error = f"TCDD ağ hatası: {result['networkError']}"
+                    await self._cleanup()
+                    if idempotent:
+                        continue
+                    break
+
+                return _BrowserResponse(
+                    status_code=int(result.get("status", 500)),
+                    data=result.get("data"),
+                    headers=result.get("headers") or {},
+                )
+        raise YHTError(error)
+
+    async def aclose(self) -> None:
+        async with self._get_lock():
+            await self._cleanup()
 
     async def _cleanup(self) -> None:
         for obj, method in (
@@ -153,20 +242,9 @@ class _BrowserTransport:
 _browser_transport = _BrowserTransport()
 
 
-class YHTError(Exception):
-    pass
-
-
-class YHTRateLimitError(YHTError):
-    """TCDD throttled the request (HTTP 429/503).
-
-    Carries the server-provided cooldown (``Retry-After``) when available so the
-    caller can wait the requested amount instead of hammering the endpoint.
-    """
-
-    def __init__(self, message: str, *, retry_after: Optional[float] = None) -> None:
-        super().__init__(message)
-        self.retry_after = retry_after
+async def close_browser_transport() -> None:
+    """Shut down the shared browser. Call once on worker/bot shutdown."""
+    await _browser_transport.aclose()
 
 
 @dataclass
@@ -216,12 +294,6 @@ class TCDDClient:
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Dest": "empty",
         }
-
-    @property
-    def _json_headers(self) -> dict[str, str]:
-        # POST bodies are JSON; a browser only sends Content-Type on requests that
-        # actually carry a body, so GETs use ``_base_headers`` instead.
-        return {**self._base_headers, "Content-Type": "application/json"}
 
     async def close(self) -> None:
         await self._session.close()
@@ -340,12 +412,14 @@ class TCDDClient:
             "searchType": "DOMESTIC",
             "blTrainTypes": ["TURISTIK_TREN"],
         }
-        response = await _browser_transport.post_tms("/train/train-availability", payload)
+        response = await _browser_transport.post_tms(
+            "/train/train-availability", payload, idempotent=True
+        )
         data = response.json()
         if (
             response.status_code == 400
             and isinstance(data, dict)
-            and data.get("code") in (604, 12511)
+            and data.get("code") in _EMPTY_AVAILABILITY_CODES
         ):
             return []
         self._raise_for_tcdd(response)
@@ -399,7 +473,9 @@ class TCDDClient:
             "trainId": train_id,
             "legIndex": 0,
         }
-        response = await _browser_transport.post_tms("/seat-maps/load-by-train-id", payload)
+        response = await _browser_transport.post_tms(
+            "/seat-maps/load-by-train-id", payload, idempotent=True
+        )
         self._raise_for_tcdd(response)
         wagon = self._select_wagon_with_empty_seat(response.json().get("seatMaps", []))
         if wagon is None:
@@ -529,12 +605,12 @@ class TCDDClient:
     def _parse_retry_after(response) -> Optional[float]:
         """Read a ``Retry-After`` header, as either a seconds value or HTTP date."""
         try:
-            raw = response.headers.get("Retry-After")
+            raw = response.headers.get("retry-after")
         except Exception:
             return None
         if not raw:
             return None
-        raw = raw.strip()
+        raw = str(raw).strip()
         if raw.isdigit():
             return float(raw)
         try:
