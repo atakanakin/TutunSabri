@@ -212,6 +212,31 @@ class AmbiguityAndShutdownTests(unittest.IsolatedAsyncioTestCase):
         transport._ensure_page.assert_not_called()
 
 
+class PageDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_diagnostics_summarise_page_state(self):
+        class Page:
+            async def evaluate(self, *_):
+                return {"title": "Just a moment...", "turnstile": False, "vue2Store": False}
+
+            async def screenshot(self, **_):
+                raise RuntimeError("no display")
+
+        text = await logic._BrowserTransport._page_diagnostics(Page())
+        self.assertIn("title='Just a moment...'", text)
+        self.assertIn("turnstile=False", text)
+
+    async def test_diagnostics_never_raise(self):
+        class Page:
+            async def evaluate(self, *_):
+                raise RuntimeError("crashed")
+
+            async def screenshot(self, **_):
+                raise RuntimeError("crashed")
+
+        text = await logic._BrowserTransport._page_diagnostics(Page())
+        self.assertIn("unavailable", text)
+
+
 class _StopLoop(Exception):
     pass
 

@@ -172,17 +172,63 @@ class _BrowserTransport:
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
         self._page = await self._context.new_page()
-        await self._page.goto(
-            yht_settings.web_referer,
-            wait_until="domcontentloaded",
-            timeout=timeout_ms,
-        )
-        await self._page.wait_for_function(
-            "() => window.turnstile && Array.from(document.querySelectorAll('*')).some(el => el.__vue__ && el.__vue__.$store)",
-            timeout=timeout_ms,
-        )
+        try:
+            await self._page.goto(
+                yht_settings.web_referer,
+                wait_until="domcontentloaded",
+                timeout=timeout_ms,
+            )
+            await self._page.wait_for_function(
+                "() => window.turnstile && Array.from(document.querySelectorAll('*')).some(el => el.__vue__ && el.__vue__.$store)",
+                timeout=timeout_ms,
+            )
+        except Exception as exc:
+            diagnostics = await self._page_diagnostics(self._page)
+            logger.error("TCDD page did not become ready: %r | %s", exc, diagnostics)
+            raise YHTError(f"TCDD sayfası hazır olmadı ({diagnostics})") from exc
         await asyncio.sleep(_PAGE_SETTLE_SECONDS)
         return self._page
+
+    @staticmethod
+    async def _page_diagnostics(page: Page) -> str:
+        """Describe why the page is not usable and save a screenshot.
+
+        Tells apart a blocked/challenge page (odd title or body text, no
+        turnstile), a changed frontend (turnstile present but no Vue 2 store)
+        and a plain slow load, so a failure can be diagnosed from the log.
+        """
+        try:
+            info = await asyncio.wait_for(
+                page.evaluate(
+                    """() => {
+                        const els = Array.from(document.querySelectorAll('*'));
+                        return {
+                            url: location.href,
+                            title: document.title,
+                            ready: document.readyState,
+                            turnstile: typeof window.turnstile !== 'undefined',
+                            vue2Store: els.some(e => e.__vue__ && e.__vue__.$store),
+                            vue3App: els.some(e => e.__vue_app__),
+                            body: ((document.body && document.body.innerText) || '')
+                                .replace(/\\s+/g, ' ').slice(0, 120),
+                        };
+                    }"""
+                ),
+                timeout=_CLEANUP_STEP_TIMEOUT_SECONDS,
+            )
+            summary = ", ".join(f"{k}={v!r}" for k, v in info.items())
+        except Exception as exc:
+            summary = f"page state unavailable: {exc!r}"
+        try:
+            path = Path(yht_settings.station_cache_path).parent / "tcdd_debug.png"
+            await asyncio.wait_for(
+                page.screenshot(path=str(path)),
+                timeout=_CLEANUP_STEP_TIMEOUT_SECONDS,
+            )
+            logger.info("Saved TCDD debug screenshot to %s", path)
+        except Exception as exc:
+            logger.info("Could not save TCDD debug screenshot: %r", exc)
+        return summary
 
     async def post_tms(
         self, path: str, payload: Dict[str, Any], *, idempotent: bool = False
