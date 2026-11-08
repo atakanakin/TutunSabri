@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
+import time
 import traceback
 from datetime import datetime, timezone
 from html import escape
@@ -23,17 +25,94 @@ from core.repositories import (
     update_task_status,
 )
 from modules.yht.config import yht_settings
-from modules.yht.logic import TCDDClient, YHTError
+from modules.yht.logic import (
+    TCDDClient,
+    YHTAmbiguousRequestError,
+    YHTError,
+    YHTRateLimitError,
+    YHTTransportClosedError,
+    close_browser_transport,
+)
 from modules.yht.utils import format_route_sentence
 
 
-broker = ListQueueBroker(url=settings.redis_url)
+logger = logging.getLogger(__name__)
+
+broker = ListQueueBroker(url=settings.redis_url, socket_timeout=None)
+
+
+def _jittered(value: float, spread: float = 0.2) -> float:
+    """Apply ±spread multiplicative jitter so waits are never perfectly periodic."""
+    return value * random.uniform(1 - spread, 1 + spread)
+
+
+def _poll_sleep() -> float:
+    """Normal polling cadence with configured jitter."""
+    return _jittered(
+        yht_settings.poll_interval_seconds,
+        yht_settings.poll_jitter_ratio,
+    )
+
+
+def _error_backoff(error_count: int) -> float:
+    """Exponential backoff (jittered) after `error_count` consecutive failures."""
+    base = yht_settings.error_backoff_base_seconds
+    cap = yht_settings.error_backoff_max_seconds
+    delay = min(cap, base * (2 ** max(0, error_count - 1)))
+    return _jittered(delay)
+
+
+def _rate_limit_sleep(retry_after: float | None) -> float:
+    """Cooldown for an HTTP 429/503, honoring Retry-After within sane bounds."""
+    cooldown = retry_after if retry_after else yht_settings.rate_limit_cooldown_seconds
+    cooldown = max(cooldown, float(yht_settings.poll_interval_seconds))
+    cooldown = min(cooldown, yht_settings.error_backoff_max_seconds)
+    return _jittered(cooldown, 0.1)
+
+
+def _retry_after_delay(retry_after: float | None, default: float) -> float:
+    """Wait for a short retry, honoring Retry-After but never beyond the cap."""
+    delay = retry_after if retry_after else default
+    return _jittered(min(delay, yht_settings.error_backoff_max_seconds))
+
+
+async def _sleep_unless_cancelled(task_id: str, seconds: float) -> bool:
+    """Sleep ``seconds`` in poll-sized chunks; stop early if the task is cancelled.
+
+    Returns True when the task was found cancelled (or gone) while waiting. Long
+    waits (cooldowns, hold-expiry waits) would otherwise ignore ``/cancel``
+    until they finish.
+    """
+    remaining = float(seconds)
+    chunk = float(max(1, yht_settings.poll_interval_seconds))
+    while remaining > 0:
+        step = min(chunk, remaining)
+        await asyncio.sleep(step)
+        remaining -= step
+        if remaining <= 0:
+            return False
+        async with SessionFactory() as session:
+            task = await get_task_by_public_id(session, task_id)
+        if task is None or task.status in {
+            SearchTaskStatus.cancelled,
+            SearchTaskStatus.failed,
+            SearchTaskStatus.completed,
+        }:
+            return True
+    return False
 
 
 @broker.on_event("startup")
 async def startup() -> None:
     await init_database()
     await TCDDClient().ensure_station_cache()
+
+
+@broker.on_event("shutdown")
+async def shutdown() -> None:
+    # The browser is shared by every task in this worker, so it is closed here
+    # and not in the per-task ``client.close()``.
+    await close_browser_transport()
 
 
 def _format_admin_error(task, user, error_text: str) -> str:
@@ -122,11 +201,44 @@ def _hold_message(task, hold_result: dict, hold_attempt_count: int) -> str:
     )
 
 
+def _rate_limit_elapsed(since: float | None) -> float:
+    return 0.0 if since is None else time.monotonic() - since
+
+
+def _rate_limit_expired(since: float | None) -> bool:
+    return _rate_limit_elapsed(since) >= yht_settings.rate_limit_give_up_minutes * 60.0
+
+
+def _cap_to_give_up(delay: float, since: float | None) -> float:
+    """Never sleep past the give-up deadline, so the task ends on time."""
+    remaining = yht_settings.rate_limit_give_up_minutes * 60.0 - _rate_limit_elapsed(
+        since
+    )
+    return max(1.0, min(delay, remaining + 1.0))
+
+
+async def _fail_for_rate_limit(bot: Bot, task, exc: Exception) -> None:
+    minutes = yht_settings.rate_limit_give_up_minutes
+    await _fail_task_with_notifications(
+        bot,
+        task_id=task.task_id,
+        user_id=task.user_id,
+        user_message=(
+            f"TCDD {minutes:g} dakikadır isteklerimizi sınırladığı için arama "
+            "iptal edildi. Lütfen daha sonra tekrar deneyin."
+        ),
+        last_result="rate limited",
+        error_text=f"{minutes:g} dakikadır kesintisiz rate limit: {exc}",
+    )
+
+
 @broker.task
 async def monitor_yht_task(task_id: str) -> None:
     client = TCDDClient()
     error_count = 0
+    rate_limited_since: float | None = None
     hold_error_count = 0
+    deferred_sleep: float | None = None
     sleep_seconds = yht_settings.poll_interval_seconds
     current_user_id = None
     bot = Bot(
@@ -136,7 +248,13 @@ async def monitor_yht_task(task_id: str) -> None:
 
     try:
         while True:
-            sleep_seconds = yht_settings.poll_interval_seconds * random.uniform(0.75, 1.25)
+            if deferred_sleep is not None:
+                # A wait requested by the previous iteration (hold retry or
+                # unknown-outcome cooldown). It happens outside any DB session
+                # and stays responsive to /cancel.
+                wait, deferred_sleep = deferred_sleep, None
+                await _sleep_unless_cancelled(task_id, wait)
+            sleep_seconds = _poll_sleep()
             now = datetime.now(timezone.utc)
             async with SessionFactory() as session:
                 task = await get_task_by_public_id(session, task_id)
@@ -188,8 +306,20 @@ async def monitor_yht_task(task_id: str) -> None:
                                     allocation_id=task.allocation_id,
                                     seat_number=task.seat_number,
                                 )
-                            except Exception:
-                                pass
+                            except Exception as release_exc:
+                                logger.warning(
+                                    "Releasing expired seat for task %s failed: %r",
+                                    task_id,
+                                    release_exc,
+                                )
+                                await _notify_admins(
+                                    bot,
+                                    _format_admin_error(
+                                        task,
+                                        user,
+                                        f"Seat release failed: {release_exc!r}",
+                                    ),
+                                )
 
                         if attempts >= yht_settings.max_hold_attempts:
                             await update_task_status(
@@ -238,7 +368,31 @@ async def monitor_yht_task(task_id: str) -> None:
                         travel_date=task.travel_date,
                         travel_hour=task.travel_hour,
                     )
+                except YHTRateLimitError as exc:
+                    # Throttling is not a hard failure: don't spend the error
+                    # budget, just wait out the server-requested cooldown and
+                    # retry. This keeps the bot polite and avoids escalating a
+                    # temporary 429 into a permanent block.
+                    if rate_limited_since is None:
+                        rate_limited_since = time.monotonic()
+                    if _rate_limit_expired(rate_limited_since):
+                        await _fail_for_rate_limit(bot, task, exc)
+                        return
+                    await update_task_status(
+                        session,
+                        task_id=task_id,
+                        status=SearchTaskStatus.running,
+                        last_result="rate limited, cooling down",
+                    )
+                    sleep_seconds = _cap_to_give_up(
+                        _rate_limit_sleep(exc.retry_after), rate_limited_since
+                    )
+                except YHTTransportClosedError:
+                    # Worker is shutting down. Leave the task as it is so it can
+                    # be resumed on the next start instead of failing it.
+                    return
                 except YHTError as exc:
+                    rate_limited_since = None
                     error_count += 1
                     await update_task_status(
                         session,
@@ -259,7 +413,9 @@ async def monitor_yht_task(task_id: str) -> None:
                             bot, _format_admin_error(task, user, str(exc))
                         )
                         return
+                    sleep_seconds = _error_backoff(error_count)
                 except Exception as exc:
+                    rate_limited_since = None
                     error_count += 1
                     await update_task_status(
                         session,
@@ -280,8 +436,15 @@ async def monitor_yht_task(task_id: str) -> None:
                             bot, _format_admin_error(task, user, str(exc))
                         )
                         return
+                    sleep_seconds = _error_backoff(error_count)
                 else:
                     error_count = 0
+                    # A successful availability check only ends a throttling
+                    # window when we are not about to hold a seat: if the hold
+                    # itself keeps getting throttled, the window must keep
+                    # running or the task would never give up.
+                    if availability is None or availability.economy_available <= 0:
+                        rate_limited_since = None
 
                     if availability is None:
                         previous_text = task.last_result or ""
@@ -297,6 +460,10 @@ async def monitor_yht_task(task_id: str) -> None:
                     elif availability.economy_available > 0:
                         hold_result = None
                         hold_error_trace = ""
+                        hold_outcome_unknown = False
+                        hold_cancelled = False
+                        hold_retry_after: float | None = None
+                        hold_rate_limited = False
                         remaining_attempts = max(
                             1,
                             yht_settings.max_poll_errors - hold_error_count,
@@ -309,33 +476,102 @@ async def monitor_yht_task(task_id: str) -> None:
                                     to_station=task.to_station,
                                 )
                                 hold_error_count = 0
+                                rate_limited_since = None
                                 break
-                            except Exception:
-                                hold_error_count += 1
-                                hold_error_trace = traceback.format_exc()
-                                if hold_error_count >= yht_settings.max_poll_errors:
-                                    await _fail_task_with_notifications(
-                                        bot,
-                                        task_id=task_id,
-                                        user_id=task.user_id,
-                                        user_message=(
-                                            "Koltuk tutma sırasında bir hata oluştu. "
-                                            "İşlem durduruldu."
-                                        ),
-                                        last_result="seat hold failed",
-                                        error_text=hold_error_trace,
-                                    )
-                                    return
+                            except YHTTransportClosedError:
+                                return
+                            except YHTAmbiguousRequestError as hold_exc:
+                                # The select-seat request may have been applied
+                                # by TCDD. We have no allocation id, so we can
+                                # neither track nor release that seat, and
+                                # trying again could hold a second one. Stop
+                                # retrying and let any hold expire first.
+                                hold_outcome_unknown = True
+                                await _notify_admins(
+                                    bot,
+                                    _format_admin_error(
+                                        task,
+                                        user,
+                                        "Seat hold outcome unknown, a seat may "
+                                        f"be held without tracking: {hold_exc}",
+                                    ),
+                                )
+                                break
+                            except Exception as hold_exc:
+                                hold_trace = traceback.format_exc()
+                                if isinstance(hold_exc, YHTRateLimitError):
+                                    # Throttling is not a hold failure; it only
+                                    # counts toward the rate limit window.
+                                    if rate_limited_since is None:
+                                        rate_limited_since = time.monotonic()
+                                    hold_rate_limited = True
+                                    hold_retry_after = hold_exc.retry_after
+                                    if _rate_limit_expired(rate_limited_since):
+                                        await _fail_for_rate_limit(bot, task, hold_exc)
+                                        return
+                                else:
+                                    rate_limited_since = None
+                                    hold_rate_limited = False
+                                    hold_error_count += 1
+                                    hold_error_trace = hold_trace
+                                    if hold_error_count >= yht_settings.max_poll_errors:
+                                        await _fail_task_with_notifications(
+                                            bot,
+                                            task_id=task_id,
+                                            user_id=task.user_id,
+                                            user_message=(
+                                                "Koltuk tutma sırasında bir hata oluştu. "
+                                                "İşlem durduruldu."
+                                            ),
+                                            last_result="seat hold failed",
+                                            error_text=hold_error_trace,
+                                        )
+                                        return
                                 if attempt_index < remaining_attempts - 1:
-                                    await asyncio.sleep(2)
+                                    if await _sleep_unless_cancelled(
+                                        task_id,
+                                        _retry_after_delay(
+                                            hold_retry_after if hold_rate_limited else None,
+                                            yht_settings.hold_retry_delay_seconds,
+                                        ),
+                                    ):
+                                        hold_cancelled = True
+                                        break
+                        if hold_cancelled:
+                            # Re-read the task at the top of the loop, which
+                            # handles cancellation and notifies the user.
+                            continue
+                        if hold_outcome_unknown:
+                            await update_task_status(
+                                session,
+                                task_id=task_id,
+                                status=SearchTaskStatus.running,
+                                last_result="seat hold outcome unknown, waiting",
+                            )
+                            deferred_sleep = _jittered(
+                                yht_settings.hold_duration_minutes * 60.0 + 30.0,
+                                0.05,
+                            )
+                            continue
                         if hold_result is None:
                             await update_task_status(
                                 session,
                                 task_id=task_id,
                                 status=SearchTaskStatus.running,
-                                last_result="seat hold retrying",
+                                last_result=(
+                                    "rate limited, cooling down"
+                                    if hold_rate_limited
+                                    else "seat hold retrying"
+                                ),
                             )
-                            sleep_seconds = 2
+                            deferred_sleep = (
+                                _cap_to_give_up(
+                                    _rate_limit_sleep(hold_retry_after),
+                                    rate_limited_since,
+                                )
+                                if hold_rate_limited
+                                else _jittered(yht_settings.hold_retry_delay_seconds)
+                            )
                             continue
                         hold_attempt_count = (task.hold_attempt_count or 0) + 1
                         message = _hold_message(
@@ -375,7 +611,7 @@ async def monitor_yht_task(task_id: str) -> None:
                             await bot.send_message(
                                 user.telegram_user_id, outgoing_message
                             )
-            await asyncio.sleep(sleep_seconds)
+            await _sleep_unless_cancelled(task_id, sleep_seconds)
     except Exception:
         if current_user_id is not None:
             await _fail_task_with_notifications(

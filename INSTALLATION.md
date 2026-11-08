@@ -6,7 +6,7 @@ This guide targets Ubuntu and installs the bot as a long-running system service.
 
 ```bash
 sudo apt update
-sudo apt install -y git curl redis-server python3 python3-venv python3-pip
+sudo apt install -y git curl redis-server python3 python3-venv python3-pip xvfb
 ```
 
 ## 2. Clone the project
@@ -62,6 +62,16 @@ Fill out the BOT_TOKEN part
 ```bash
 uv sync
 ```
+
+### Browser for TCDD requests
+
+TCDD requests are sent through a real browser (Playwright). Install Google Chrome, or the bundled Chromium:
+
+```bash
+uv run playwright install --with-deps chromium
+```
+
+The browser runs with a visible window by default (`TCDD_BROWSER_HEADLESS=false`). The provided systemd units therefore start the bot and worker under `xvfb-run` (virtual display), which is why `xvfb` is installed in step 1. If you prefer, remove `xvfb-run` from the units and set `TCDD_BROWSER_HEADLESS=true` instead, but verify that requests still succeed: Turnstile may reject headless browsers.
 
 ## 6. Start and enable Redis
 

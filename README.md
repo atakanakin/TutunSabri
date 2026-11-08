@@ -17,13 +17,16 @@ An async Telegram bot that monitors train availability and holds a seat the mome
 | Bot framework | [aiogram](https://docs.aiogram.dev/) 3.x |
 | Database | SQLite via SQLAlchemy (async) |
 | Task queue | [TaskIQ](https://taskiq-python.github.io/) + Redis |
-| HTTP client | [curl-cffi](https://github.com/yifeikong/curl-cffi) |
+| HTTP client | [curl-cffi](https://github.com/yifeikong/curl-cffi) (station list) |
+| Browser automation | [Playwright](https://playwright.dev/python/) (TCDD API requests) |
 | Config | Pydantic Settings |
 
 ## Requirements
 
 - Python 3.9+
 - Redis
+- Google Chrome, Microsoft Edge or Playwright's Chromium (see step 2 below)
+- A display (or Xvfb) when `TCDD_BROWSER_HEADLESS=false`, which is the default
 
 ## Setup
 
@@ -31,13 +34,16 @@ An async Telegram bot that monitors train availability and holds a seat the mome
 # 1. Clone and install dependencies
 uv sync
 
-# 2. Copy and fill in the environment file
+# 2. Install a browser for Playwright (skip if Chrome/Edge is installed)
+uv run playwright install chromium
+
+# 3. Copy and fill in the environment file
 cp .env.example .env
 
-# 3. Start Redis (if not already running)
+# 4. Start Redis (if not already running)
 redis-server
 
-# 4. Run the bot
+# 5. Run the bot
 tutunsabri
 ```
 
