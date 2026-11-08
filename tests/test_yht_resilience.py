@@ -1,5 +1,6 @@
 import asyncio
 import os
+import types
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from email.utils import format_datetime
@@ -267,9 +268,11 @@ class MonitorFlowTests(unittest.IsolatedAsyncioTestCase):
         client.hold_seat = mock.AsyncMock(side_effect=hold_side_effect)
         client.close = mock.AsyncMock()
         sleeps = []
+        self.clock = [0.0]
 
         async def sleeper(task_id, seconds):
             sleeps.append(seconds)
+            self.clock[0] += seconds
             if len(sleeps) >= stop_after:
                 raise _StopLoop()
             return False
@@ -294,6 +297,9 @@ class MonitorFlowTests(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(worker, "update_task_status", mocks["status"]), \
                 mock.patch.object(worker, "_notify_admins", mocks["notify"]), \
                 mock.patch.object(worker, "_fail_task_with_notifications", mocks["fail"]), \
+                mock.patch.object(
+                    worker, "time", types.SimpleNamespace(monotonic=lambda: self.clock[0])
+                ), \
                 mock.patch.object(worker, "_sleep_unless_cancelled", sleeper):
             try:
                 await worker.monitor_yht_task.original_func("t1")
@@ -336,28 +342,58 @@ class MonitorFlowTests(unittest.IsolatedAsyncioTestCase):
         for call in mocks["status"].await_args_list:
             self.assertNotEqual(call.kwargs.get("status"), SearchTaskStatus.failed)
 
-    async def test_consecutive_rate_limits_stop_the_task(self):
-        rl = logic.YHTRateLimitError("x")
-        with mock.patch.object(yht_settings, "max_rate_limit_streak", 3):
-            client, sleeps, mocks, stopped = await self._run(
-                availability_side_effect=[rl, rl, rl, rl],
-                hold_side_effect=None,
-                stop_after=99,
-            )
-        self.assertFalse(stopped)
-        self.assertEqual(client.check_specific_departure.await_count, 3)
-        mocks["fail"].assert_awaited_once()
+    async def test_continuous_rate_limit_cancels_after_give_up_window(self):
+        def always_limited(**_):
+            raise logic.YHTRateLimitError("x")
 
-    async def test_other_error_resets_the_rate_limit_streak(self):
-        rl = logic.YHTRateLimitError("x")
-        with mock.patch.object(yht_settings, "max_rate_limit_streak", 3):
-            client, sleeps, mocks, stopped = await self._run(
-                availability_side_effect=[rl, rl, logic.YHTError("e"), rl, rl, None],
-                hold_side_effect=None,
-                stop_after=6,
-            )
-        self.assertEqual(client.check_specific_departure.await_count, 6)
+        client, sleeps, mocks, stopped = await self._run(
+            availability_side_effect=always_limited,
+            hold_side_effect=None,
+            stop_after=10_000,
+        )
+        self.assertFalse(stopped)
+        mocks["fail"].assert_awaited_once()
+        limit = yht_settings.rate_limit_give_up_minutes * 60
+        # Ends right at the deadline, not up to a whole cooldown late.
+        self.assertGreaterEqual(self.clock[0], limit)
+        self.assertLessEqual(self.clock[0], limit + 2)
+        self.assertIn("dakikadır", mocks["fail"].await_args.kwargs["user_message"])
+
+    async def test_success_or_other_error_restarts_the_window(self):
+        limit = yht_settings.rate_limit_give_up_minutes * 60
+        state = {"errored": False}
+
+        def flaky(**_):
+            now = self.clock[0]
+            if now < limit * 0.7:
+                raise logic.YHTRateLimitError("x")
+            if not state["errored"]:
+                state["errored"] = True
+                raise logic.YHTError("other")
+            if now < limit * 1.6:
+                raise logic.YHTRateLimitError("x")
+            return None
+
+        client, sleeps, mocks, stopped = await self._run(
+            availability_side_effect=flaky,
+            hold_side_effect=None,
+            stop_after=10_000,
+        )
+        # 0.7*limit throttled, a different error, then another 0.9*limit
+        # throttled: neither stretch alone reaches the limit.
         self.assertEqual(_real_failures(mocks["fail"]), [])
+
+    async def test_rate_limits_during_hold_count_toward_the_window(self):
+        client, sleeps, mocks, stopped = await self._run(
+            availability_side_effect=lambda **_: _Availability(),
+            hold_side_effect=logic.YHTRateLimitError("slow down"),
+            stop_after=10_000,
+        )
+        self.assertFalse(stopped)
+        mocks["fail"].assert_awaited_once()
+        limit = yht_settings.rate_limit_give_up_minutes * 60
+        self.assertGreaterEqual(self.clock[0], limit)
+        self.assertLessEqual(self.clock[0], limit + 5)
 
 
 class SleepUnlessCancelledTests(unittest.IsolatedAsyncioTestCase):
