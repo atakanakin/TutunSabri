@@ -212,6 +212,65 @@ class AmbiguityAndShutdownTests(unittest.IsolatedAsyncioTestCase):
         transport._ensure_page.assert_not_called()
 
 
+class _ReadyPage:
+    def __init__(self, vue=True, turnstile=False):
+        self.vue, self.turnstile = vue, turnstile
+        self.waited = []
+
+    def is_closed(self):
+        return False
+
+    async def goto(self, *_, **__):
+        return None
+
+    async def wait_for_function(self, script, **_):
+        self.waited.append(script)
+        if script == logic._VUE_READY_JS and not self.vue:
+            raise TimeoutError("vue never ready")
+        if script == logic._TURNSTILE_READY_JS and not self.turnstile:
+            raise TimeoutError("no turnstile")
+
+    async def evaluate(self, *_):
+        return {"turnstile": self.turnstile, "vue2Store": self.vue}
+
+    async def screenshot(self, **_):
+        return None
+
+
+class EnsurePageTests(unittest.IsolatedAsyncioTestCase):
+    def _fake_playwright(self, page):
+        context = mock.MagicMock()
+        context.add_init_script = mock.AsyncMock()
+        context.new_page = mock.AsyncMock(return_value=page)
+        browser = mock.MagicMock()
+        browser.new_context = mock.AsyncMock(return_value=context)
+        pw = mock.MagicMock()
+        pw.chromium.launch = mock.AsyncMock(return_value=browser)
+        starter = mock.MagicMock()
+        starter.start = mock.AsyncMock(return_value=pw)
+        return mock.patch.object(logic, "async_playwright", return_value=starter)
+
+    async def test_page_is_usable_without_turnstile(self):
+        page = _ReadyPage(vue=True, turnstile=False)
+        transport = logic._BrowserTransport()
+        transport._cleanup = mock.AsyncMock()
+        with self._fake_playwright(page), mock.patch.object(
+            logic, "_PAGE_SETTLE_SECONDS", 0.0
+        ):
+            result = await transport._ensure_page()
+        self.assertIs(result, page)
+        self.assertIn(logic._TURNSTILE_READY_JS, page.waited)
+
+    async def test_missing_vue_store_is_still_an_error_with_diagnostics(self):
+        page = _ReadyPage(vue=False)
+        transport = logic._BrowserTransport()
+        transport._cleanup = mock.AsyncMock()
+        with self._fake_playwright(page):
+            with self.assertRaises(logic.YHTError) as ctx:
+                await transport._ensure_page()
+        self.assertIn("vue2Store=False", str(ctx.exception))
+
+
 class PageDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
     async def test_diagnostics_summarise_page_state(self):
         class Page:

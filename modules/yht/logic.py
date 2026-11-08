@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 # store and Turnstile are available, before the first request is issued.
 _PAGE_SETTLE_SECONDS = 2.0
 
+# The page is usable once its Vue store exists. The Turnstile script is waited
+# for only briefly: on some hosts it never loads, and that must not make the
+# whole transport unusable (the actual API calls then show whether TCDD
+# accepts them).
+_VUE_READY_JS = (
+    "() => Array.from(document.querySelectorAll('*'))"
+    ".some(el => el.__vue__ && el.__vue__.$store)"
+)
+_TURNSTILE_READY_JS = "() => !!window.turnstile"
+_TURNSTILE_GRACE_MS = 10_000
+
 # Evaluated inside the TCDD page. The Vue root instance is looked up once and
 # cached on ``window`` so we don't walk the whole DOM on every call. It never
 # throws for "expected" conditions; it reports them as plain data so Python can
@@ -178,14 +189,21 @@ class _BrowserTransport:
                 wait_until="domcontentloaded",
                 timeout=timeout_ms,
             )
-            await self._page.wait_for_function(
-                "() => window.turnstile && Array.from(document.querySelectorAll('*')).some(el => el.__vue__ && el.__vue__.$store)",
-                timeout=timeout_ms,
-            )
+            await self._page.wait_for_function(_VUE_READY_JS, timeout=timeout_ms)
         except Exception as exc:
             diagnostics = await self._page_diagnostics(self._page)
             logger.error("TCDD page did not become ready: %r | %s", exc, diagnostics)
             raise YHTError(f"TCDD sayfası hazır olmadı ({diagnostics})") from exc
+        try:
+            await self._page.wait_for_function(
+                _TURNSTILE_READY_JS,
+                timeout=min(timeout_ms, _TURNSTILE_GRACE_MS),
+            )
+        except Exception:
+            logger.warning(
+                "Turnstile did not load within %ss; continuing without it",
+                _TURNSTILE_GRACE_MS // 1000,
+            )
         await asyncio.sleep(_PAGE_SETTLE_SECONDS)
         return self._page
 
